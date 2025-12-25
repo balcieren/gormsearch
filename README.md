@@ -132,6 +132,34 @@ for _, p := range results.Hits {
 }
 ```
 
+### Multi-Type MultiSearch
+
+Search multiple indexes with different types in a single request:
+
+```go
+var products []Product
+var categories []Category
+var users []User
+
+// Single HTTP request, multiple types
+err := gormsearch.MultiSearch(gs,
+    gormsearch.Query(&products, "macbook"),
+    gormsearch.Query(&categories, "electronics"),
+    gormsearch.Query(&users, "john", gormsearch.WithLimit(5)),
+)
+
+// With context
+err := gormsearch.MultiSearchWithContext(ctx, gs,
+    gormsearch.Query(&products, "macbook"),
+    gormsearch.Query(&categories, "electronics"),
+)
+
+// With explicit index name
+err := gormsearch.MultiSearch(gs,
+    gormsearch.QueryIndex(&products, "custom_index", "macbook"),
+)
+```
+
 ## API
 
 ### New / MustNew

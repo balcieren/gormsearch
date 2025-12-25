@@ -225,3 +225,112 @@ func decodeHits[T any](hits []map[string]any) ([]T, error) {
 	}
 	return result, nil
 }
+
+// ============================================================================
+// Multi-Type MultiSearch (Fluent Variadic API)
+// ============================================================================
+
+// TypedQuery holds a typed query with its closure-based decoder.
+type TypedQuery struct {
+	indexName string
+	query     string
+	opts      SearchOptions
+	decode    func([]map[string]any) error
+}
+
+// Query creates a typed query with auto-detected index name.
+//
+//	gormsearch.Query(&products, "macbook")
+//	gormsearch.Query(&categories, "electronics", gormsearch.WithLimit(10))
+func Query[T any](dest *[]T, query string, opts ...SearchOption) TypedQuery {
+	options := SearchOptions{Limit: DefaultLimit}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	return TypedQuery{
+		indexName: indexNameFor[T](),
+		query:     query,
+		opts:      options,
+		decode: func(hits []map[string]any) error {
+			items, err := decodeHits[T](hits)
+			if err != nil {
+				return err
+			}
+			*dest = items
+			return nil
+		},
+	}
+}
+
+// QueryIndex creates a typed query with explicit index name.
+func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption) TypedQuery {
+	options := SearchOptions{Limit: DefaultLimit}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	return TypedQuery{
+		indexName: indexName,
+		query:     query,
+		opts:      options,
+		decode: func(hits []map[string]any) error {
+			items, err := decodeHits[T](hits)
+			if err != nil {
+				return err
+			}
+			*dest = items
+			return nil
+		},
+	}
+}
+
+// MultiSearch executes multiple typed queries in a single request.
+//
+//	var products []Product
+//	var categories []Category
+//	err := gormsearch.MultiSearch(gs,
+//	    gormsearch.Query(&products, "macbook"),
+//	    gormsearch.Query(&categories, "electronics"),
+//	)
+func MultiSearch(gs *GormSearch, queries ...TypedQuery) error {
+	return MultiSearchWithContext(context.Background(), gs, queries...)
+}
+
+// MultiSearchWithContext executes multiple typed queries with context.
+func MultiSearchWithContext(ctx context.Context, gs *GormSearch, queries ...TypedQuery) error {
+	if len(queries) == 0 {
+		return nil
+	}
+
+	// Build search queries
+	searchQueries := make([]SearchQuery, 0, len(queries))
+	for _, q := range queries {
+		searchQueries = append(searchQueries, SearchQuery{
+			IndexName: q.indexName,
+			Query:     q.query,
+			Limit:     q.opts.Limit,
+			Offset:    q.opts.Offset,
+			Filter:    q.opts.Filter,
+			Sort:      q.opts.Sort,
+		})
+	}
+
+	// Execute multi-search (single HTTP request)
+	results, err := gs.MultiSearchWithContext(ctx, searchQueries...)
+	if err != nil {
+		return err
+	}
+
+	// Decode each result using pre-built closures (no reflection)
+	for i, q := range queries {
+		if i >= len(results.Results) {
+			break
+		}
+		if err := q.decode(results.Results[i].Hits); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
