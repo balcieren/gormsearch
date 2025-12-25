@@ -2,18 +2,24 @@ package gormsearch
 
 import (
 	"encoding/json"
+	"reflect"
+	"sync"
 
 	"github.com/meilisearch/meilisearch-go"
 )
 
+// indexNameCache caches index names by type to avoid repeated reflection.
+var indexNameCache sync.Map
+
 // TypedSearchResult wraps search results with typed hits.
 type TypedSearchResult[T any] struct {
-	Hits             []T
-	Query            string
-	ProcessingTimeMs int64
-	Limit            int64
-	Offset           int64
-	EstimatedTotal   int64
+	Hits              []T
+	Query             string
+	ProcessingTimeMs  int64
+	Limit             int64
+	Offset            int64
+	EstimatedTotal    int64
+	FacetDistribution map[string]map[string]int64
 }
 
 // TypedMultiSearchResult wraps multi-search results with typed hits.
@@ -26,20 +32,26 @@ type TypedMultiSearchResult[T any] struct {
 
 // Searcher provides typed search operations.
 type Searcher[T any] struct {
-	gs *GormSearch
+	gs        *GormSearch
+	indexName string
 }
 
 // Of creates a typed searcher for the given GormSearch instance.
-// Use this when making multiple typed searches.
-//
-//	products := gormsearch.Of[Product](gs)
-//	results, _ := products.Search("products", "query")
+// Index name is automatically detected from the type T.
 func Of[T any](gs *GormSearch) *Searcher[T] {
-	return &Searcher[T]{gs: gs}
+	return &Searcher[T]{
+		gs:        gs,
+		indexName: indexNameFor[T](),
+	}
 }
 
-// Search performs a typed search query.
-func (s *Searcher[T]) Search(indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
+// Search performs a typed search query with auto-detected index name.
+func (s *Searcher[T]) Search(query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
+	return SearchFor[T](s.gs, query, opts...)
+}
+
+// SearchIndex performs a typed search query on a specific index.
+func (s *Searcher[T]) SearchIndex(indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
 	return SearchAs[T](s.gs, indexName, query, opts...)
 }
 
@@ -48,10 +60,19 @@ func (s *Searcher[T]) MultiSearch(queries ...SearchQuery) (*TypedMultiSearchResu
 	return MultiSearchAs[T](s.gs, queries...)
 }
 
-// --- Option 2: Direct functions (for single searches) ---
+// --- Option 2: Auto-detect index name (recommended) ---
 
-// SearchAs performs a typed search query.
-// Use this for one-off typed searches.
+// SearchFor performs a typed search with auto-detected index name.
+// Index name is derived from the type T using the same rules as Register().
+//
+//	results, _ := gormsearch.SearchFor[Product](gs, "macbook")
+func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
+	return SearchAs[T](gs, indexNameFor[T](), query, opts...)
+}
+
+// --- Option 3: Explicit index name ---
+
+// SearchAs performs a typed search query with explicit index name.
 //
 //	results, _ := gormsearch.SearchAs[Product](gs, "products", "query")
 func SearchAs[T any](gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
@@ -66,12 +87,13 @@ func SearchAs[T any](gs *GormSearch, indexName, query string, opts ...SearchOpti
 	}
 
 	return &TypedSearchResult[T]{
-		Hits:             hits,
-		Query:            result.Query,
-		ProcessingTimeMs: result.ProcessingTimeMs,
-		Limit:            result.Limit,
-		Offset:           result.Offset,
-		EstimatedTotal:   result.EstimatedTotal,
+		Hits:              hits,
+		Query:             result.Query,
+		ProcessingTimeMs:  result.ProcessingTimeMs,
+		Limit:             result.Limit,
+		Offset:            result.Offset,
+		EstimatedTotal:    result.EstimatedTotal,
+		FacetDistribution: result.FacetDistribution,
 	}, nil
 }
 
@@ -91,12 +113,13 @@ func MultiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSe
 		}
 
 		typedResults = append(typedResults, TypedSearchResult[T]{
-			Hits:             hits,
-			Query:            r.Query,
-			ProcessingTimeMs: r.ProcessingTimeMs,
-			Limit:            r.Limit,
-			Offset:           r.Offset,
-			EstimatedTotal:   r.EstimatedTotal,
+			Hits:              hits,
+			Query:             r.Query,
+			ProcessingTimeMs:  r.ProcessingTimeMs,
+			Limit:             r.Limit,
+			Offset:            r.Offset,
+			EstimatedTotal:    r.EstimatedTotal,
+			FacetDistribution: r.FacetDistribution,
 		})
 	}
 
@@ -107,6 +130,37 @@ func MultiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSe
 }
 
 // --- Utility functions ---
+
+// indexNameFor returns the cached index name for type T.
+func indexNameFor[T any]() string {
+	var zero T
+	t := reflect.TypeOf(zero)
+	if t == nil {
+		// T is an interface, use pointer
+		t = reflect.TypeOf(&zero).Elem()
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	key := t.PkgPath() + "." + t.Name()
+
+	// Check cache
+	if cached, ok := indexNameCache.Load(key); ok {
+		return cached.(string)
+	}
+
+	// Parse model to get index name
+	config, err := parseModel(&zero)
+	if err != nil {
+		// Fallback to default
+		return toSnakeCase(t.Name()) + "s"
+	}
+
+	// Cache and return
+	indexNameCache.Store(key, config.IndexName)
+	return config.IndexName
+}
 
 // DecodeHits decodes raw hits into a typed slice.
 func DecodeHits[T any](hits []map[string]any) ([]T, error) {

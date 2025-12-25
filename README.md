@@ -116,22 +116,20 @@ type Article struct {
 Get typed results instead of `map[string]any`:
 
 ```go
-// Option 1: Wrapper (for multiple typed searches)
-products := gormsearch.Of[Product](gs)
-results, _ := products.Search("products", "macbook")
-multiResults, _ := products.MultiSearch(queries...)
+// Auto-detect index name from type (recommended)
+results, _ := gormsearch.SearchFor[Product](gs, "macbook")
 
-// Option 2: Direct function (for one-off searches)
-results, _ := gormsearch.SearchAs[Product](gs, "products", "macbook")
-multiResults, _ := gormsearch.MultiSearchAs[Product](gs, queries...)
+// Or with wrapper
+products := gormsearch.Of[Product](gs)
+results, _ := products.Search("macbook")  // Auto-detect!
+
+// Explicit index name (if needed)
+results, _ := gormsearch.SearchAs[Product](gs, "custom_index", "macbook")
 
 // Access typed results
 for _, p := range results.Hits {
     fmt.Println(p.Name, p.Price)  // Typed!
 }
-
-// Convert existing results
-items, _ := gormsearch.DecodeHits[Product](result.Hits)
 ```
 
 ## API
