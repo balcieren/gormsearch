@@ -121,10 +121,10 @@ results, _ := gormsearch.SearchFor[Product](gs, "macbook")
 
 // Or with wrapper
 products := gormsearch.Of[Product](gs)
-results, _ := products.Search("macbook")  // Auto-detect!
+results, _ := products.Search("macbook")
 
-// Explicit index name (if needed)
-results, _ := gormsearch.SearchAs[Product](gs, "custom_index", "macbook")
+// With context (fluent API)
+results, _ := products.WithContext(ctx).Search("macbook")
 
 // Access typed results
 for _, p := range results.Hits {
