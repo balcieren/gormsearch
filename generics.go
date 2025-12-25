@@ -1,6 +1,7 @@
 package gormsearch
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"sync"
@@ -8,7 +9,6 @@ import (
 	"github.com/meilisearch/meilisearch-go"
 )
 
-// indexNameCache caches index names by type to avoid repeated reflection.
 var indexNameCache sync.Map
 
 // TypedSearchResult wraps search results with typed hits.
@@ -28,55 +28,97 @@ type TypedMultiSearchResult[T any] struct {
 	ProcessingTimeMs int64
 }
 
-// --- Option 1: Searcher wrapper (for multiple searches) ---
+// ============================================================================
+// Searcher (Fluent API)
+// ============================================================================
 
-// Searcher provides typed search operations.
+// Searcher provides typed search operations with fluent API.
 type Searcher[T any] struct {
 	gs        *GormSearch
 	indexName string
+	ctx       context.Context
 }
 
 // Of creates a typed searcher for the given GormSearch instance.
-// Index name is automatically detected from the type T.
+//
+//	products := gormsearch.Of[Product](gs)
+//	results, _ := products.Search("macbook")
 func Of[T any](gs *GormSearch) *Searcher[T] {
 	return &Searcher[T]{
 		gs:        gs,
 		indexName: indexNameFor[T](),
+		ctx:       context.Background(),
 	}
 }
 
-// Search performs a typed search query with auto-detected index name.
+// WithContext returns a new Searcher with the given context.
+//
+//	results, _ := products.WithContext(ctx).Search("macbook")
+func (s *Searcher[T]) WithContext(ctx context.Context) *Searcher[T] {
+	return &Searcher[T]{
+		gs:        s.gs,
+		indexName: s.indexName,
+		ctx:       ctx,
+	}
+}
+
+// Search performs a typed search with auto-detected index name.
 func (s *Searcher[T]) Search(query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return SearchFor[T](s.gs, query, opts...)
+	return searchAs[T](s.ctx, s.gs, s.indexName, query, opts...)
 }
 
-// SearchIndex performs a typed search query on a specific index.
+// SearchIndex performs a typed search on a specific index.
 func (s *Searcher[T]) SearchIndex(indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return SearchAs[T](s.gs, indexName, query, opts...)
+	return searchAs[T](s.ctx, s.gs, indexName, query, opts...)
 }
 
-// MultiSearch performs a typed multi-search query.
+// MultiSearch performs a typed multi-search.
 func (s *Searcher[T]) MultiSearch(queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	return MultiSearchAs[T](s.gs, queries...)
+	return multiSearchAs[T](s.ctx, s.gs, queries...)
 }
 
-// --- Option 2: Auto-detect index name (recommended) ---
+// ============================================================================
+// Direct Functions
+// ============================================================================
 
 // SearchFor performs a typed search with auto-detected index name.
-// Index name is derived from the type T using the same rules as Register().
 //
 //	results, _ := gormsearch.SearchFor[Product](gs, "macbook")
 func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return SearchAs[T](gs, indexNameFor[T](), query, opts...)
+	return searchAs[T](context.Background(), gs, indexNameFor[T](), query, opts...)
 }
 
-// --- Option 3: Explicit index name ---
+// SearchForWithContext performs a typed search with context.
+func SearchForWithContext[T any](ctx context.Context, gs *GormSearch, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
+	return searchAs[T](ctx, gs, indexNameFor[T](), query, opts...)
+}
 
-// SearchAs performs a typed search query with explicit index name.
-//
-//	results, _ := gormsearch.SearchAs[Product](gs, "products", "query")
+// SearchAs performs a typed search with explicit index name.
 func SearchAs[T any](gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	result, err := gs.Search(indexName, query, opts...)
+	return searchAs[T](context.Background(), gs, indexName, query, opts...)
+}
+
+// SearchAsWithContext performs a typed search with context and explicit index name.
+func SearchAsWithContext[T any](ctx context.Context, gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
+	return searchAs[T](ctx, gs, indexName, query, opts...)
+}
+
+// MultiSearchAs performs a typed multi-search.
+func MultiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
+	return multiSearchAs[T](context.Background(), gs, queries...)
+}
+
+// MultiSearchAsWithContext performs a typed multi-search with context.
+func MultiSearchAsWithContext[T any](ctx context.Context, gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
+	return multiSearchAs[T](ctx, gs, queries...)
+}
+
+// ============================================================================
+// Internal
+// ============================================================================
+
+func searchAs[T any](ctx context.Context, gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
+	result, err := gs.SearchWithContext(ctx, indexName, query, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -97,21 +139,18 @@ func SearchAs[T any](gs *GormSearch, indexName, query string, opts ...SearchOpti
 	}, nil
 }
 
-// MultiSearchAs performs a typed multi-search query.
-func MultiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	result, err := gs.MultiSearch(queries...)
+func multiSearchAs[T any](ctx context.Context, gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
+	result, err := gs.MultiSearchWithContext(ctx, queries...)
 	if err != nil {
 		return nil, err
 	}
 
 	typedResults := make([]TypedSearchResult[T], 0, len(result.Results))
-
 	for _, r := range result.Results {
 		hits, err := decodeHits[T](r.Hits)
 		if err != nil {
 			return nil, err
 		}
-
 		typedResults = append(typedResults, TypedSearchResult[T]{
 			Hits:              hits,
 			Query:             r.Query,
@@ -129,14 +168,10 @@ func MultiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSe
 	}, nil
 }
 
-// --- Utility functions ---
-
-// indexNameFor returns the cached index name for type T.
 func indexNameFor[T any]() string {
 	var zero T
 	t := reflect.TypeOf(zero)
 	if t == nil {
-		// T is an interface, use pointer
 		t = reflect.TypeOf(&zero).Elem()
 	}
 	if t.Kind() == reflect.Ptr {
@@ -144,20 +179,15 @@ func indexNameFor[T any]() string {
 	}
 
 	key := t.PkgPath() + "." + t.Name()
-
-	// Check cache
 	if cached, ok := indexNameCache.Load(key); ok {
 		return cached.(string)
 	}
 
-	// Parse model to get index name
 	config, err := parseModel(&zero)
 	if err != nil {
-		// Fallback to default
 		return toSnakeCase(t.Name()) + "s"
 	}
 
-	// Cache and return
 	indexNameCache.Store(key, config.IndexName)
 	return config.IndexName
 }
@@ -180,7 +210,6 @@ func DecodeInto[T any](hits meilisearch.Hits) ([]T, error) {
 	return result, nil
 }
 
-// decodeHits converts map hits to typed struct slice.
 func decodeHits[T any](hits []map[string]any) ([]T, error) {
 	result := make([]T, 0, len(hits))
 	for _, hit := range hits {
