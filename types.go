@@ -1,18 +1,55 @@
 package gormsearch
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/meilisearch/meilisearch-go"
 	"gorm.io/gorm"
 )
 
+// ============================================================================
+// Constants
+// ============================================================================
+
+const (
+	DefaultLimit   int64 = 20
+	MaxLimit       int64 = 1000
+	DefaultBatch   int   = 100
+	DefaultWorkers int   = 10
+	MaxQueryLength int   = 1000
+)
+
+// ============================================================================
+// Errors
+// ============================================================================
+
+var (
+	ErrNilDB              = errors.New("gormsearch: database connection is nil")
+	ErrNilClient          = errors.New("gormsearch: meilisearch client is nil")
+	ErrNilModel           = errors.New("gormsearch: model is nil")
+	ErrIndexNotRegistered = errors.New("gormsearch: index not registered")
+	ErrQueryTooLong       = errors.New("gormsearch: query exceeds maximum length")
+	ErrNoQueries          = errors.New("gormsearch: no queries provided")
+)
+
+// ============================================================================
+// Interfaces
+// ============================================================================
+
 // Indexable is an optional interface for custom index names.
-// If a model implements this interface, its IndexName() will be used.
-// Otherwise, the table name from GORM will be used.
 type Indexable interface {
 	IndexName() string
 }
+
+// Tabler is the GORM interface for custom table names.
+type Tabler interface {
+	TableName() string
+}
+
+// ============================================================================
+// Core Types
+// ============================================================================
 
 // GormSearch is the main struct that bridges GORM and Meilisearch.
 type GormSearch struct {
@@ -20,17 +57,17 @@ type GormSearch struct {
 	client   meilisearch.ServiceManager
 	config   *Config
 	registry map[string]*IndexConfig
-	mu       sync.RWMutex // Protects registry
-	pool     *workerPool  // Limits concurrent async operations
+	mu       sync.RWMutex
+	pool     *workerPool
 }
 
 // Config holds the configuration options for GormSearch.
 type Config struct {
 	BatchSize  int
 	Async      bool
-	MaxWorkers int                        // Max concurrent async operations (default: 10)
-	MaxRetries int                        // Max retries for failed operations (default: 3)
-	OnError    func(op string, err error) // Error callback for async operations
+	MaxWorkers int
+	MaxRetries int
+	OnError    func(op string, err error)
 }
 
 // IndexConfig holds the parsed configuration for a registered model.
@@ -54,6 +91,10 @@ type fieldInfo struct {
 	Skip       bool
 }
 
+// ============================================================================
+// Search Types
+// ============================================================================
+
 // SearchResult wraps the search response from Meilisearch.
 type SearchResult struct {
 	Hits              []map[string]any
@@ -71,9 +112,29 @@ type SearchOptions struct {
 	Offset    int64
 	Filter    string
 	Sort      []string
-	Facets    []string // Attributes for faceted search
-	Highlight []string // Attributes to highlight
+	Facets    []string
+	Highlight []string
 }
+
+// SearchQuery represents a single query for MultiSearch.
+type SearchQuery struct {
+	IndexName string
+	Query     string
+	Limit     int64
+	Offset    int64
+	Filter    string
+	Sort      []string
+}
+
+// MultiSearchResult wraps multiple search results.
+type MultiSearchResult struct {
+	Results          []SearchResult
+	ProcessingTimeMs int64
+}
+
+// ============================================================================
+// Internal Types
+// ============================================================================
 
 // workerPool limits concurrent async operations.
 type workerPool struct {
@@ -82,17 +143,10 @@ type workerPool struct {
 
 func newWorkerPool(size int) *workerPool {
 	if size <= 0 {
-		size = 10
+		size = DefaultWorkers
 	}
-	return &workerPool{
-		sem: make(chan struct{}, size),
-	}
+	return &workerPool{sem: make(chan struct{}, size)}
 }
 
-func (p *workerPool) acquire() {
-	p.sem <- struct{}{}
-}
-
-func (p *workerPool) release() {
-	<-p.sem
-}
+func (p *workerPool) acquire() { p.sem <- struct{}{} }
+func (p *workerPool) release() { <-p.sem }

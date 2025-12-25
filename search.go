@@ -3,33 +3,9 @@ package gormsearch
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/meilisearch/meilisearch-go"
 )
-
-// Errors
-var (
-	ErrIndexNotRegistered = errors.New("index not registered")
-	ErrQueryTooLong       = errors.New("query exceeds maximum length")
-	ErrNoQueries          = errors.New("no queries provided")
-)
-
-// SearchQuery represents a single query for MultiSearch.
-type SearchQuery struct {
-	IndexName string
-	Query     string
-	Limit     int64
-	Offset    int64
-	Filter    string
-	Sort      []string
-}
-
-// MultiSearchResult wraps multiple search results.
-type MultiSearchResult struct {
-	Results          []SearchResult
-	ProcessingTimeMs int64
-}
 
 // Search performs a search query on the specified index.
 func (gs *GormSearch) Search(indexName, query string, opts ...SearchOption) (*SearchResult, error) {
