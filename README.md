@@ -78,14 +78,15 @@ func main() {
         Category: "electronics",
     })
 
-    results, _ := gs.Search("products", "macbook",
+    // Search with Typed API (Recommended)
+    results, _ := gormsearch.SearchFor[Product](gs, "macbook",
         gormsearch.WithLimit(10),
         gormsearch.WithFilter("category = 'electronics'"),
         gormsearch.WithSort("price:asc"),
     )
 
-    for _, hit := range results.Hits {
-        fmt.Println(hit["name"])
+    for _, product := range results.Hits {
+        fmt.Printf("Found: %s ($%.2f)\n", product.Name, product.Price)
     }
 }
 ```
