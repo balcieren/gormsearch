@@ -78,7 +78,7 @@ func main() {
         Category: "electronics",
     })
 
-    // Search with Typed API (Recommended)
+    // Search with Typed API
     results, _ := gormsearch.SearchFor[Product](gs, "macbook",
         gormsearch.WithLimit(10),
         gormsearch.WithFilter("category = 'electronics'"),
@@ -112,14 +112,14 @@ type Article struct {
 }
 ```
 
-## Generics Support (Recommended)
+## Typed Search
 
-Get typed results directly. This is the recommended way to use the library.
+Get typed results directly using Go generics.
 
 ### Single Search
 
 ```go
-// Auto-detect index name from type (recommended)
+// Auto-detect index name from type
 results, _ := gormsearch.SearchFor[Product](gs, "macbook")
 
 // Or with fluent API
@@ -129,7 +129,7 @@ results, _ := products.WithContext(ctx).Search("macbook")
 
 // Access typed results
 for _, p := range results.Hits {
-    fmt.Println(p.Name, p.Price)  // Typed!
+    fmt.Printf("Found: %s ($%.2f)\n", p.Name, p.Price)
 }
 ```
 
@@ -161,7 +161,7 @@ err := gormsearch.MultiSearch(gs,
 )
 ```
 
-## Raw API (Advanced)
+## Raw Search
 
 If you need `map[string]any` results or dynamic index names.
 
