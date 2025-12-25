@@ -111,19 +111,19 @@ type Article struct {
 }
 ```
 
-## Generics Support
+## Generics Support (Recommended)
 
-Get typed results instead of `map[string]any`:
+Get typed results directly. This is the recommended way to use the library.
+
+### Single Search
 
 ```go
 // Auto-detect index name from type (recommended)
 results, _ := gormsearch.SearchFor[Product](gs, "macbook")
 
-// Or with wrapper
+// Or with fluent API
 products := gormsearch.Of[Product](gs)
 results, _ := products.Search("macbook")
-
-// With context (fluent API)
 results, _ := products.WithContext(ctx).Search("macbook")
 
 // Access typed results
@@ -134,7 +134,7 @@ for _, p := range results.Hits {
 
 ### Multi-Type MultiSearch
 
-Search multiple indexes with different types in a single request:
+Perform searches across multiple indexes with different types in a single HTTP request.
 
 ```go
 var products []Product
@@ -160,7 +160,9 @@ err := gormsearch.MultiSearch(gs,
 )
 ```
 
-## API
+## Raw API (Advanced)
+
+If you need `map[string]any` results or dynamic index names.
 
 ### New / MustNew
 
@@ -174,7 +176,6 @@ gs, err := gormsearch.New(db, meiliClient,
         log.Printf("error: %v", err)
     }),
 )
-
 // Or panic on error
 gs := gormsearch.MustNew(db, meiliClient)
 ```
@@ -185,7 +186,7 @@ gs := gormsearch.MustNew(db, meiliClient)
 gs.Register(&Product{})
 ```
 
-### Search
+### Search (Raw)
 
 ```go
 results, err := gs.Search("products", "query",
@@ -194,15 +195,11 @@ results, err := gs.Search("products", "query",
     gormsearch.WithFilter("category = 'electronics' AND price < 1000"),
     gormsearch.WithSort("price:asc", "created_at:desc"),
 )
-
-// results.Hits - Search results
-// results.EstimatedTotal - Estimated total count
-// results.ProcessingTimeMs - Processing time in milliseconds
 ```
 
-### MultiSearch
+### MultiSearch (Raw)
 
-Search across multiple indexes in a single request (more efficient than multiple Search calls):
+Search across multiple indexes in a single request returning raw maps:
 
 ```go
 results, err := gs.MultiSearchRaw(
