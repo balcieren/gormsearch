@@ -3,6 +3,7 @@ package gormsearch
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"time"
 )
 
@@ -76,11 +77,27 @@ func extractID(model any) string {
 		}
 	}
 
-	if idField.IsValid() {
-		return fmt.Sprintf("%v", idField.Interface())
+	if !idField.IsValid() {
+		return ""
 	}
 
-	return ""
+	// Fast path for common types
+	switch id := idField.Interface().(type) {
+	case uint:
+		return strconv.FormatUint(uint64(id), 10)
+	case uint64:
+		return strconv.FormatUint(id, 10)
+	case uint32:
+		return strconv.FormatUint(uint64(id), 10)
+	case int:
+		return strconv.FormatInt(int64(id), 10)
+	case int64:
+		return strconv.FormatInt(id, 10)
+	case string:
+		return id
+	default:
+		return fmt.Sprintf("%v", id)
+	}
 }
 
 // isSoftDeleted checks if a model has been soft deleted (DeletedAt is set).
