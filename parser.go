@@ -15,18 +15,13 @@ func parseModel(model any) (*IndexConfig, error) {
 	}
 
 	config := &IndexConfig{
-		IndexName:        toSnakeCase(t.Name()) + "s",
+		IndexName:        resolveIndexName(model, t),
 		PrimaryKey:       "id",
 		ModelType:        t.Name(),
 		SearchableFields: make([]string, 0),
 		FilterableFields: make([]string, 0),
 		SortableFields:   make([]string, 0),
 		FieldMapping:     make(map[string]fieldInfo),
-	}
-
-	// Check if model implements Indexable interface
-	if indexable, ok := model.(Indexable); ok {
-		config.IndexName = indexable.IndexName()
 	}
 
 	// Parse struct fields
@@ -156,4 +151,28 @@ func mergeFieldMappings(main, embedded *IndexConfig) {
 func toSnakeCase(s string) string {
 	namingStrategy := schema.NamingStrategy{}
 	return namingStrategy.ColumnName("", s)
+}
+
+// Tabler is the GORM interface for custom table names.
+type Tabler interface {
+	TableName() string
+}
+
+// resolveIndexName determines the index name with priority:
+// 1. IndexName() if model implements Indexable
+// 2. TableName() if model implements Tabler (GORM)
+// 3. Default: snake_case(StructName) + "s"
+func resolveIndexName(model any, t reflect.Type) string {
+	// Priority 1: Indexable interface (custom index name)
+	if indexable, ok := model.(Indexable); ok {
+		return indexable.IndexName()
+	}
+
+	// Priority 2: Tabler interface (GORM table name)
+	if tabler, ok := model.(Tabler); ok {
+		return tabler.TableName()
+	}
+
+	// Priority 3: Default (struct name + "s")
+	return toSnakeCase(t.Name()) + "s"
 }
