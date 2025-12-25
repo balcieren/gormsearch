@@ -140,7 +140,7 @@ func searchAs[T any](ctx context.Context, gs *GormSearch, indexName, query strin
 }
 
 func multiSearchAs[T any](ctx context.Context, gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	result, err := gs.MultiSearchWithContext(ctx, queries...)
+	result, err := gs.MultiSearchRawWithContext(ctx, queries...)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +317,7 @@ func MultiSearchWithContext(ctx context.Context, gs *GormSearch, queries ...Type
 	}
 
 	// Execute multi-search (single HTTP request)
-	results, err := gs.MultiSearchWithContext(ctx, searchQueries...)
+	results, err := gs.MultiSearchRawWithContext(ctx, searchQueries...)
 	if err != nil {
 		return err
 	}

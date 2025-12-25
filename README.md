@@ -205,7 +205,7 @@ results, err := gs.Search("products", "query",
 Search across multiple indexes in a single request (more efficient than multiple Search calls):
 
 ```go
-results, err := gs.MultiSearch(
+results, err := gs.MultiSearchRaw(
     gormsearch.SearchQuery{
         IndexName: "products",
         Query:     "macbook",
@@ -237,7 +237,7 @@ defer cancel()
 results, err := gs.SearchWithContext(ctx, "products", "query")
 
 // Context-aware multi-search
-results, err := gs.MultiSearchWithContext(ctx, queries...)
+results, err := gs.MultiSearchRawWithContext(ctx, queries...)
 
 // Context-aware sync
 err := gs.SyncWithContext(ctx, &Product{})

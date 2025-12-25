@@ -70,13 +70,13 @@ func (gs *GormSearch) SearchWithContext(ctx context.Context, indexName, query st
 	}, nil
 }
 
-// MultiSearch performs search across multiple indexes in a single request.
-func (gs *GormSearch) MultiSearch(queries ...SearchQuery) (*MultiSearchResult, error) {
-	return gs.MultiSearchWithContext(context.Background(), queries...)
+// MultiSearchRaw performs search across multiple indexes in a single request.
+func (gs *GormSearch) MultiSearchRaw(queries ...SearchQuery) (*MultiSearchResult, error) {
+	return gs.MultiSearchRawWithContext(context.Background(), queries...)
 }
 
-// MultiSearchWithContext performs multi-search with context for timeout/cancellation.
-func (gs *GormSearch) MultiSearchWithContext(ctx context.Context, queries ...SearchQuery) (*MultiSearchResult, error) {
+// MultiSearchRawWithContext performs multi-search with context for timeout/cancellation.
+func (gs *GormSearch) MultiSearchRawWithContext(ctx context.Context, queries ...SearchQuery) (*MultiSearchResult, error) {
 	if len(queries) == 0 {
 		return nil, ErrNoQueries
 	}
