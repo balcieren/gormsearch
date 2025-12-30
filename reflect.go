@@ -1,6 +1,7 @@
 package gormsearch
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -8,9 +9,20 @@ import (
 )
 
 // encodeDocument encodes a model using custom encoder or default reflection.
-func (gs *GormSearch) encodeDocument(model any, config *IndexConfig) (map[string]any, error) {
-	if gs.config != nil && gs.config.Encoder != nil {
-		return gs.config.Encoder(model)
+func (gs *GormSearch) encodeDocument(model any, config *IndexConfig) (any, error) {
+	if gs.config != nil {
+		// Use JSON Encoder if present
+		if gs.config.JSONEncoder != nil {
+			data, err := gs.config.JSONEncoder(model)
+			if err != nil {
+				return nil, err
+			}
+			return json.RawMessage(data), nil
+		}
+		// Use Legacy Encoder if present
+		if gs.config.MapEncoder != nil {
+			return gs.config.MapEncoder(model)
+		}
 	}
 	return gs.toDocument(model, config), nil
 }
@@ -170,4 +182,125 @@ func isMatchingModel(model any, config *IndexConfig) bool {
 		t = t.Elem()
 	}
 	return t.Name() == config.ModelType
+}
+
+// decodeDocument populates a struct from a map using cached field extractors.
+// This avoids the JSON roundtrip (map -> json -> struct) which is very expensive.
+func (gs *GormSearch) decodeDocument(doc map[string]any, dest any) error {
+	// 1. Get the IndexConfig for this type
+	// We can infer the index name from the type of dest (which is a pointer to the struct)
+
+	// Unpack pointer
+	v := reflect.ValueOf(dest)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return fmt.Errorf("gormsearch: decode destination must be a non-nil pointer")
+	}
+	v = v.Elem() // Now we have the struct
+
+	// Find config
+	// Since we don't have the index name passed in here easily without changing signature,
+	// We will try to match based on type name from registry.
+	// This is a linear search but registry is small.
+	var config *IndexConfig
+	typeName := v.Type().Name()
+
+	// Fast path: Try index name cache first if possible, but here we just iterate registry
+	// Optimization: This iteration is negligible compared to JSON overhead
+	for _, cfg := range gs.registry {
+		if cfg.ModelType == typeName {
+			config = cfg
+			break
+		}
+	}
+
+	if config == nil {
+		// If config not found, fallback to JSON (slower but safe)
+		data, err := json.Marshal(doc)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(data, dest)
+	}
+
+	// 2. Map fields
+	for _, extractor := range config.FieldExtractors {
+		val, ok := doc[extractor.JSONName]
+		if !ok {
+			continue
+		}
+
+		field := v.FieldByIndex(extractor.FieldIndex)
+		if !field.CanSet() {
+			continue
+		}
+
+		// Handle Geo fields specifically if implemented,
+		// but standard Meilisearch geo is _geo: {lat, lng}
+		// Our custom extractor handles flat geo fields in struct -> nested json.
+		// Reverse mapping (JSON -> Struct) for Geo:
+		if extractor.IsGeo {
+			if geoMap, ok := val.(map[string]any); ok {
+				if lat, ok := geoMap["lat"].(float64); ok && len(extractor.GeoLatIndex) > 0 {
+					setFloat(v.FieldByIndex(extractor.GeoLatIndex), lat)
+				}
+				if lng, ok := geoMap["lng"].(float64); ok && len(extractor.GeoLngIndex) > 0 {
+					setFloat(v.FieldByIndex(extractor.GeoLngIndex), lng)
+				}
+			}
+			continue
+		}
+
+		// Set value based on kind
+		setFieldValue(field, val)
+	}
+
+	return nil
+}
+
+func setFieldValue(field reflect.Value, val any) {
+	if val == nil {
+		return
+	}
+
+	switch field.Kind() {
+	case reflect.String:
+		if v, ok := val.(string); ok {
+			field.SetString(v)
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if v, ok := val.(float64); ok { // JSON numbers are floats
+			field.SetInt(int64(v))
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if v, ok := val.(float64); ok {
+			field.SetUint(uint64(v))
+		}
+	case reflect.Float32, reflect.Float64:
+		if v, ok := val.(float64); ok {
+			field.SetFloat(v)
+		}
+	case reflect.Bool:
+		if v, ok := val.(bool); ok {
+			field.SetBool(v)
+		}
+	case reflect.Struct:
+		// Handle time.Time
+		if field.Type() == reflect.TypeOf(time.Time{}) {
+			if v, ok := val.(string); ok {
+				if t, err := time.Parse(time.RFC3339, v); err == nil {
+					field.Set(reflect.ValueOf(t))
+				}
+			}
+		}
+	}
+}
+
+func setFloat(field reflect.Value, val float64) {
+	if !field.CanSet() {
+		return
+	}
+	switch field.Kind() {
+	case reflect.Float32, reflect.Float64:
+		field.SetFloat(val)
+	}
 }
