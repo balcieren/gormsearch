@@ -16,80 +16,26 @@ func (gs *GormSearch) encodeDocument(model any, config *IndexConfig) (map[string
 	return gs.toDocument(model, config), nil
 }
 
-// toDocument converts a GORM model to a Meilisearch document.
+// toDocument converts a GORM model to a Meilisearch document using cached extractors.
 func (gs *GormSearch) toDocument(model any, config *IndexConfig) map[string]any {
 	v := reflectValue(model)
-	t := v.Type()
 	// Optimization: Pre-allocate map with capacity hint
-	doc := make(map[string]any, len(config.FieldMapping))
+	doc := make(map[string]any, len(config.FieldExtractors))
 
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		value := v.Field(i)
+	for _, extractor := range config.FieldExtractors {
+		val := v.FieldByIndex(extractor.FieldIndex)
 
-		if !field.IsExported() {
-			continue
-		}
-
-		if field.Anonymous {
-			// Optimization: Extract in-place
-			extractEmbeddedFields(value, config, doc)
-			continue
-		}
-
-		info, exists := config.FieldMapping[field.Name]
-		if !exists || info.Skip {
-			continue
-		}
-
-		if info.Geo {
-			if geo, ok := extractGeo(value); ok {
-				doc[info.JSONName] = geo
+		if extractor.IsGeo {
+			if geo, ok := extractGeo(val); ok {
+				doc[extractor.JSONName] = geo
 			}
 			continue
 		}
 
-		doc[info.JSONName] = value.Interface()
+		doc[extractor.JSONName] = val.Interface()
 	}
 
 	return doc
-}
-
-// extractEmbeddedFields extracts fields from embedded structs directly into the result map.
-func extractEmbeddedFields(v reflect.Value, config *IndexConfig, result map[string]any) {
-	v = reflectValue(v.Interface())
-	if !v.IsValid() {
-		return
-	}
-
-	t := v.Type()
-
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if !field.IsExported() {
-			continue
-		}
-
-		// Handle nested embedding recursion
-		if field.Anonymous {
-			extractEmbeddedFields(v.Field(i), config, result)
-			continue
-		}
-
-		info, exists := config.FieldMapping[field.Name]
-		if !exists || info.Skip {
-			continue
-		}
-
-		if info.Geo {
-			if geo, ok := extractGeo(v.Field(i)); ok {
-				result[info.JSONName] = geo
-			}
-			continue
-		}
-
-		result[info.JSONName] = v.Field(i).Interface()
-	}
 }
 
 // extractGeo attempts to extract lat/lng from a struct value.
@@ -141,10 +87,16 @@ func toFloat(v reflect.Value) (float64, error) {
 	}
 }
 
-// extractID extracts the primary key value from a model.
-func extractID(model any) string {
+// extractID extracts the primary key value from a model using cached indices.
+func extractID(model any, config *IndexConfig) string {
 	v := reflectValue(model)
 
+	// Optimization: Use cached field index if available
+	if len(config.IDFieldIndices) > 0 {
+		return valToString(v.FieldByIndex(config.IDFieldIndices))
+	}
+
+	// Fallback to legacy lookup (should rarely happen if parsed correctly)
 	idField := v.FieldByName("ID")
 	if !idField.IsValid() {
 		if modelField := v.FieldByName("Model"); modelField.IsValid() {
@@ -156,8 +108,12 @@ func extractID(model any) string {
 		return ""
 	}
 
+	return valToString(idField)
+}
+
+func valToString(v reflect.Value) string {
 	// Fast path for common types
-	switch id := idField.Interface().(type) {
+	switch id := v.Interface().(type) {
 	case uint:
 		return strconv.FormatUint(uint64(id), 10)
 	case uint64:

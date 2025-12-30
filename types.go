@@ -119,6 +119,16 @@ type IndexConfig struct {
 	SortableFields   []string
 	FieldMapping     map[string]fieldInfo
 	Model            any // Reference to the original model instance
+	// Optimization fields
+	IDFieldIndices  []int            // Path to ID field (for nested structs)
+	FieldExtractors []FieldExtractor // Pre-computed list of fields to extract
+}
+
+// FieldExtractor holds pre-computed reflection data for field extraction.
+type FieldExtractor struct {
+	FieldIndex []int  // Path to field (indices)
+	JSONName   string // JSON key name
+	IsGeo      bool   // Is this a geo field?
 }
 
 // fieldInfo holds information about a struct field.

@@ -23,27 +23,33 @@ func parseModel(model any) (*IndexConfig, error) {
 		SortableFields:   make([]string, 0),
 		FieldMapping:     make(map[string]fieldInfo),
 		Model:            model,
+		FieldExtractors:  make([]FieldExtractor, 0),
 	}
 
-	// Parse struct fields
+	// Recursively parse fields
+	parseFieldsRecursive(t, config, nil)
+
+	return config, nil
+}
+
+// parseFieldsRecursive walks the struct type tree to find all fields and build extractors.
+func parseFieldsRecursive(t reflect.Type, config *IndexConfig, parentIndex []int) {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+		currIndex := append(parentIndex, i)
 
-		// Skip unexported fields
+		// Skip unexported fields (unless anonymous/embedded)
 		if !field.IsExported() {
 			continue
 		}
 
-		// Handle embedded structs (like gorm.Model)
+		// Handle embedded structs
 		if field.Anonymous {
-			embeddedConfig, err := parseEmbeddedStruct(field.Type)
-			if err != nil {
-				continue
-			}
-			mergeFieldMappings(config, embeddedConfig)
+			parseFieldsRecursive(field.Type, config, currIndex)
 			continue
 		}
 
+		// Parse tags
 		info := parseFieldTags(field)
 		if info.Skip {
 			continue
@@ -51,9 +57,16 @@ func parseModel(model any) (*IndexConfig, error) {
 
 		config.FieldMapping[field.Name] = info
 
-		// Check for primary key
+		// Update config based on tags
 		if info.PrimaryKey {
 			config.PrimaryKey = info.JSONName
+			// Store ID field indices only if it's the primary key
+			config.IDFieldIndices = make([]int, len(currIndex))
+			copy(config.IDFieldIndices, currIndex)
+		} else if field.Name == "ID" && len(config.IDFieldIndices) == 0 {
+			// Default ID fallback
+			config.IDFieldIndices = make([]int, len(currIndex))
+			copy(config.IDFieldIndices, currIndex)
 		}
 
 		if info.Searchable {
@@ -65,34 +78,16 @@ func parseModel(model any) (*IndexConfig, error) {
 		if info.Sortable {
 			config.SortableFields = append(config.SortableFields, info.JSONName)
 		}
-	}
 
-	return config, nil
-}
-
-// parseEmbeddedStruct handles embedded struct fields.
-func parseEmbeddedStruct(t reflect.Type) (*IndexConfig, error) {
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-
-	config := &IndexConfig{
-		FieldMapping: make(map[string]fieldInfo),
-	}
-
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if !field.IsExported() {
-			continue
+		// Add to extractors
+		extractor := FieldExtractor{
+			FieldIndex: make([]int, len(currIndex)),
+			JSONName:   info.JSONName,
+			IsGeo:      info.Geo,
 		}
-
-		info := parseFieldTags(field)
-		if !info.Skip {
-			config.FieldMapping[field.Name] = info
-		}
+		copy(extractor.FieldIndex, currIndex)
+		config.FieldExtractors = append(config.FieldExtractors, extractor)
 	}
-
-	return config, nil
 }
 
 // parseFieldTags extracts field configuration from struct tags.

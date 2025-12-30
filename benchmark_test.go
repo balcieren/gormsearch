@@ -54,9 +54,14 @@ func BenchmarkExtractID(b *testing.B) {
 		Model: gorm.Model{ID: 12345},
 	}
 
+	// Setup config with cached indices
+	config := &IndexConfig{
+		IDFieldIndices: []int{0}, // ID is the first field in gorm.Model
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		extractID(model)
+		extractID(model, config)
 	}
 }
 

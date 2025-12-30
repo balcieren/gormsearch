@@ -55,7 +55,7 @@ func (gs *GormSearch) syncDocument(db *gorm.DB, config *IndexConfig, op operatio
 		return
 	}
 
-	id := extractID(db.Statement.Model)
+	id := extractID(db.Statement.Model, config)
 	if id == "" {
 		return
 	}
