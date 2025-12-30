@@ -1,10 +1,10 @@
 package gormsearch
 
 import (
+	"context"
 	"reflect"
 	"time"
 
-	"github.com/meilisearch/meilisearch-go"
 	"gorm.io/gorm"
 )
 
@@ -56,8 +56,6 @@ func (gs *GormSearch) syncDocument(db *gorm.DB, config *IndexConfig, op operatio
 		return
 	}
 
-	index := gs.client.Index(config.IndexName)
-
 	switch op {
 	case opCreate, opUpdate:
 		id := extractID(db.Statement.Model)
@@ -80,10 +78,17 @@ func (gs *GormSearch) syncDocument(db *gorm.DB, config *IndexConfig, op operatio
 		// Check for soft delete on the reloaded model
 		if isSoftDeleted(loadedModel) {
 			// Soft deleted - remove from Meilisearch
-			gs.execWithRetry(opDelete, func() error {
-				_, err := index.DeleteDocument(id, nil)
-				return err
-			})
+			// Soft deleted - remove from Meilisearch
+			job := Job{
+				IndexName: config.IndexName,
+				Operation: "delete",
+				ID:        id,
+			}
+			if err := gs.config.Dispatcher.Dispatch(context.Background(), job); err != nil {
+				if gs.config.OnError != nil {
+					gs.config.OnError("dispatch", err)
+				}
+			}
 			return
 		}
 
@@ -97,17 +102,24 @@ func (gs *GormSearch) syncDocument(db *gorm.DB, config *IndexConfig, op operatio
 		if doc == nil {
 			return
 		}
-		pk := config.PrimaryKey
-		opts := &meilisearch.DocumentOptions{PrimaryKey: &pk}
 
-		gs.execWithRetry(op, func() error {
-			if op == opCreate {
-				_, err := index.AddDocuments([]map[string]any{doc}, opts)
-				return err
+		// Dispatch job
+		job := Job{
+			IndexName: config.IndexName,
+			Document:  doc,
+			ID:        id,
+		}
+		if op == opCreate {
+			job.Operation = "create"
+		} else {
+			job.Operation = "update"
+		}
+
+		if err := gs.config.Dispatcher.Dispatch(context.Background(), job); err != nil {
+			if gs.config.OnError != nil {
+				gs.config.OnError("dispatch", err)
 			}
-			_, err := index.UpdateDocuments([]map[string]any{doc}, opts)
-			return err
-		})
+		}
 
 	case opDelete:
 		id := extractID(db.Statement.Model)
@@ -115,10 +127,18 @@ func (gs *GormSearch) syncDocument(db *gorm.DB, config *IndexConfig, op operatio
 			return
 		}
 
-		gs.execWithRetry(op, func() error {
-			_, err := index.DeleteDocument(id, nil)
-			return err
-		})
+		// Dispatch job
+		job := Job{
+			IndexName: config.IndexName,
+			Operation: "delete",
+			ID:        id,
+		}
+
+		if err := gs.config.Dispatcher.Dispatch(context.Background(), job); err != nil {
+			if gs.config.OnError != nil {
+				gs.config.OnError("dispatch", err)
+			}
+		}
 	}
 }
 

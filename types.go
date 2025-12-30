@@ -1,6 +1,7 @@
 package gormsearch
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -55,6 +56,28 @@ type Encoder func(model any) (map[string]any, error)
 // The dest parameter should be a pointer to a slice (e.g., *[]Product).
 type Decoder func(hits []map[string]any, dest any) error
 
+// Dispatcher abstracts the execution of a search sync operation.
+// Implement this interface to support external queues (NATS, Redis, Kafka).
+type Dispatcher interface {
+	Dispatch(ctx context.Context, job Job) error
+}
+
+// DispatcherFunc allows using a function as a Dispatcher.
+type DispatcherFunc func(ctx context.Context, job Job) error
+
+// Dispatch implements the Dispatcher interface.
+func (f DispatcherFunc) Dispatch(ctx context.Context, job Job) error {
+	return f(ctx, job)
+}
+
+// Job represents a unit of work to be synced to Meilisearch.
+type Job struct {
+	IndexName string
+	Operation string         // "create", "update", "delete"
+	Document  map[string]any // Encoded document (nil for delete)
+	ID        string         // Primary Key value (required for delete)
+}
+
 // ============================================================================
 // Core Types
 // ============================================================================
@@ -78,6 +101,7 @@ type Config struct {
 	OnError    func(op string, err error)
 	Encoder    Encoder
 	Decoder    Decoder
+	Dispatcher Dispatcher
 }
 
 // IndexConfig holds the parsed configuration for a registered model.

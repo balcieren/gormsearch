@@ -29,12 +29,21 @@ func New(db *gorm.DB, client meilisearch.ServiceManager, opts ...Option) (*GormS
 		opt(config)
 	}
 
+	config.Dispatcher = NewDefaultDispatcher(
+		client,
+		config.MaxWorkers,
+		config.MaxRetries,
+		config.OnError,
+	)
+
 	return &GormSearch{
 		db:       db,
 		client:   client,
 		config:   config,
 		registry: make(map[string]*IndexConfig),
-		pool:     newWorkerPool(config.MaxWorkers),
+		pool:     newWorkerPool(config.MaxWorkers), // Keep pool for other things for now, or remove if unused? safeGo logic moved to Dispatcher.
+		// Wait, safeGo is still used in hooks.go execWithRetry? No, we removed execWithRetry calls in hooks.go.
+		// But execWithRetry struct method still exists.
 	}, nil
 }
 
