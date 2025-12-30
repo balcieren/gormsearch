@@ -2,6 +2,7 @@ package gormsearch
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/meilisearch/meilisearch-go"
@@ -114,4 +115,29 @@ func toString(v any) string {
 		return e.Error()
 	}
 	return "unknown panic"
+}
+
+// QueueDispatcher is a dispatcher that publishes jobs to an external queue.
+type QueueDispatcher struct {
+	encoder func(v any) ([]byte, error)
+	publish func(ctx context.Context, data []byte) error
+}
+
+// Dispatch marshals the job and publishes it.
+func (d *QueueDispatcher) Dispatch(ctx context.Context, job Job) error {
+	data, err := d.encoder(job)
+	if err != nil {
+		return err
+	}
+	return d.publish(ctx, data)
+}
+
+// ConsumeJob deserializes and converts a job from an external queue.
+// This is a helper for consumers.
+func ConsumeJob(client meilisearch.ServiceManager, data []byte) error {
+	var job Job
+	if err := json.Unmarshal(data, &job); err != nil {
+		return err
+	}
+	return ExecuteJob(client, job)
 }
