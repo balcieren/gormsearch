@@ -195,6 +195,10 @@ func (gs *GormSearch) SyncWithContext(ctx context.Context, model any) error {
 	sliceType := reflect.SliceOf(modelType)
 	slicePtr := reflect.New(sliceType)
 
+	// Optimization: Allocate reusable document buffer outside the loop
+	// We start with nil capacity and let append grow it as needed, or we could estimate.
+	var documents []any
+
 	err = gs.db.WithContext(ctx).Model(model).FindInBatches(slicePtr.Interface(), gs.config.BatchSize, func(tx *gorm.DB, batch int) error {
 		// Check context cancellation
 		select {
@@ -209,7 +213,12 @@ func (gs *GormSearch) SyncWithContext(ctx context.Context, model any) error {
 			return nil
 		}
 
-		documents := make([]any, 0, sliceVal.Len())
+		// Reuse buffer: Reset length to 0, keep capacity
+		if cap(documents) < sliceVal.Len() {
+			documents = make([]any, 0, sliceVal.Len())
+		} else {
+			documents = documents[:0]
+		}
 
 		for i := 0; i < sliceVal.Len(); i++ {
 			item := sliceVal.Index(i).Interface()

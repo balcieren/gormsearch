@@ -69,6 +69,12 @@ func parseFieldsRecursive(t reflect.Type, config *IndexConfig, parentIndex []int
 			copy(config.IDFieldIndices, currIndex)
 		}
 
+		// Check for DeletedAt (soft delete)
+		if field.Name == "DeletedAt" && len(config.DeletedAtIndex) == 0 {
+			config.DeletedAtIndex = make([]int, len(currIndex))
+			copy(config.DeletedAtIndex, currIndex)
+		}
+
 		if info.Searchable {
 			config.SearchableFields = append(config.SearchableFields, info.JSONName)
 		}

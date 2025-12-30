@@ -119,9 +119,15 @@ func valToString(v reflect.Value) string {
 }
 
 // isSoftDeleted checks if a model has been soft deleted (DeletedAt is set).
-func isSoftDeleted(model any) bool {
+func isSoftDeleted(model any, config *IndexConfig) bool {
 	v := reflectValue(model)
 
+	// Optimization: Use cached field index if available
+	if config != nil && len(config.DeletedAtIndex) > 0 {
+		return isDeletedAtSet(v.FieldByIndex(config.DeletedAtIndex))
+	}
+
+	// Fallback to legacy lookup (DeletedAt or Model.DeletedAt)
 	// Check direct DeletedAt field
 	deletedAt := v.FieldByName("DeletedAt")
 	if deletedAt.IsValid() {

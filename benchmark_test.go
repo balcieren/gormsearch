@@ -116,8 +116,11 @@ func BenchmarkIsSoftDeleted(b *testing.B) {
 		Model: gorm.Model{ID: 1},
 	}
 
+	// Setup config with cached indices
+	config, _ := parseModel(model)
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		isSoftDeleted(model)
+		isSoftDeleted(model, config)
 	}
 }

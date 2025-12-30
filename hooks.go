@@ -79,7 +79,7 @@ func (gs *GormSearch) syncDocument(db *gorm.DB, config *IndexConfig, op operatio
 		}
 
 		// Check for soft delete on the reloaded model
-		if isSoftDeleted(loadedModel) {
+		if isSoftDeleted(loadedModel, config) {
 			job.Operation = "delete"
 			break
 		}

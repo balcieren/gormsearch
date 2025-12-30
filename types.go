@@ -124,6 +124,7 @@ type IndexConfig struct {
 	Model            any // Reference to the original model instance
 	// Optimization fields
 	IDFieldIndices  []int            // Path to ID field (for nested structs)
+	DeletedAtIndex  []int            // Path to DeletedAt field (for soft delete check)
 	FieldExtractors []FieldExtractor // Pre-computed list of fields to extract
 }
 
