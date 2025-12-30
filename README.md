@@ -143,20 +143,26 @@ var categories []Category
 var users []User
 
 // Single HTTP request, multiple types
-err := gormsearch.MultiSearch(gs,
+results, err := gormsearch.MultiSearch(gs,
     gormsearch.Query(&products, "macbook"),
     gormsearch.Query(&categories, "electronics"),
     gormsearch.Query(&users, "john", gormsearch.WithLimit(5)),
 )
 
+if err == nil {
+    fmt.Printf("Total products: %d\n", results[0].EstimatedTotal)
+    // Access full result including raw hits if needed
+    // fmt.Println(results[0].Hits[0]["name"])
+}
+
 // With context
-err := gormsearch.MultiSearchWithContext(ctx, gs,
+results, err := gormsearch.MultiSearchWithContext(ctx, gs,
     gormsearch.Query(&products, "macbook"),
     gormsearch.Query(&categories, "electronics"),
 )
 
 // With explicit index name
-err := gormsearch.MultiSearch(gs,
+results, err := gormsearch.MultiSearch(gs,
     gormsearch.QueryIndex(&products, "custom_index", "macbook"),
 )
 ```
@@ -245,6 +251,43 @@ err := gs.SyncWithContext(ctx, &Product{})
 
 ```go
 gs.Sync(&Product{})
+```
+
+## Custom Serialization
+
+You can use custom encoder/decoder functions to integrate external serialization libraries like `sonic`, `msgpack`, or `goccy/go-json` for better performance.
+
+### Custom Encoder
+
+```go
+gs, err := gormsearch.New(db, meili,
+    gormsearch.WithEncoder(func(model any) (map[string]any, error) {
+        // Use custom logic to convert model to map
+        // e.g., using sonic
+        data, err := sonic.Marshal(model)
+        if err != nil {
+            return nil, err
+        }
+        var doc map[string]any
+        err = sonic.Unmarshal(data, &doc)
+        return doc, err
+    }),
+)
+```
+
+### Custom Decoder
+
+```go
+gs, err := gormsearch.New(db, meili,
+    gormsearch.WithDecoder(func(hits []map[string]any, dest any) error {
+        // Use custom logic to decode hits into dest
+        data, err := sonic.Marshal(hits)
+        if err != nil {
+            return err
+        }
+        return sonic.Unmarshal(data, dest)
+    }),
+)
 ```
 
 ## Errors

@@ -7,11 +7,20 @@ import (
 	"time"
 )
 
+// encodeDocument encodes a model using custom encoder or default reflection.
+func (gs *GormSearch) encodeDocument(model any, config *IndexConfig) (map[string]any, error) {
+	if gs.config != nil && gs.config.Encoder != nil {
+		return gs.config.Encoder(model)
+	}
+	return gs.toDocument(model, config), nil
+}
+
 // toDocument converts a GORM model to a Meilisearch document.
 func (gs *GormSearch) toDocument(model any, config *IndexConfig) map[string]any {
 	v := reflectValue(model)
 	t := v.Type()
-	doc := make(map[string]any)
+	// Optimization: Pre-allocate map with capacity hint
+	doc := make(map[string]any, len(config.FieldMapping))
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
@@ -22,9 +31,8 @@ func (gs *GormSearch) toDocument(model any, config *IndexConfig) map[string]any 
 		}
 
 		if field.Anonymous {
-			for k, v := range extractEmbeddedFields(value, config) {
-				doc[k] = v
-			}
+			// Optimization: Extract in-place
+			extractEmbeddedFields(value, config, doc)
 			continue
 		}
 
@@ -39,19 +47,24 @@ func (gs *GormSearch) toDocument(model any, config *IndexConfig) map[string]any 
 	return doc
 }
 
-// extractEmbeddedFields extracts fields from embedded structs.
-func extractEmbeddedFields(v reflect.Value, config *IndexConfig) map[string]any {
+// extractEmbeddedFields extracts fields from embedded structs directly into the result map.
+func extractEmbeddedFields(v reflect.Value, config *IndexConfig, result map[string]any) {
 	v = reflectValue(v.Interface())
 	if !v.IsValid() {
-		return nil
+		return
 	}
 
 	t := v.Type()
-	result := make(map[string]any)
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		if !field.IsExported() {
+			continue
+		}
+
+		// Handle nested embedding recursion
+		if field.Anonymous {
+			extractEmbeddedFields(v.Field(i), config, result)
 			continue
 		}
 
@@ -62,8 +75,6 @@ func extractEmbeddedFields(v reflect.Value, config *IndexConfig) map[string]any 
 
 		result[info.JSONName] = v.Field(i).Interface()
 	}
-
-	return result
 }
 
 // extractID extracts the primary key value from a model.

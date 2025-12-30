@@ -1,6 +1,7 @@
 package gormsearch
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/meilisearch/meilisearch-go"
@@ -59,20 +60,40 @@ func (gs *GormSearch) syncDocument(db *gorm.DB, config *IndexConfig, op operatio
 
 	switch op {
 	case opCreate, opUpdate:
-		// Check for soft delete (DeletedAt is set)
-		if isSoftDeleted(db.Statement.Model) {
-			// Soft deleted - remove from Meilisearch
-			id := extractID(db.Statement.Model)
-			if id != "" {
-				gs.execWithRetry(opDelete, func() error {
-					_, err := index.DeleteDocument(id, nil)
-					return err
-				})
-			}
+		id := extractID(db.Statement.Model)
+		if id == "" {
 			return
 		}
 
-		doc := gs.toDocument(db.Statement.Model, config)
+		// Reload model from DB to ensure all fields are present (partial update fix)
+		modelType := reflect.TypeOf(db.Statement.Model)
+		if modelType.Kind() == reflect.Ptr {
+			modelType = modelType.Elem()
+		}
+		loadedModel := reflect.New(modelType).Interface()
+
+		// Use the transaction db to find the record
+		if err := db.Session(&gorm.Session{NewDB: true}).Unscoped().First(loadedModel, id).Error; err != nil {
+			return
+		}
+
+		// Check for soft delete on the reloaded model
+		if isSoftDeleted(loadedModel) {
+			// Soft deleted - remove from Meilisearch
+			gs.execWithRetry(opDelete, func() error {
+				_, err := index.DeleteDocument(id, nil)
+				return err
+			})
+			return
+		}
+
+		doc, err := gs.encodeDocument(loadedModel, config)
+		if err != nil {
+			if gs.config.OnError != nil {
+				gs.config.OnError("encode", err)
+			}
+			return
+		}
 		if doc == nil {
 			return
 		}

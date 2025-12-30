@@ -123,9 +123,16 @@ func searchAs[T any](ctx context.Context, gs *GormSearch, indexName, query strin
 		return nil, err
 	}
 
-	hits, err := decodeHits[T](result.Hits)
-	if err != nil {
-		return nil, err
+	var hits []T
+	if gs.config != nil && gs.config.Decoder != nil {
+		if err := gs.config.Decoder(result.Hits, &hits); err != nil {
+			return nil, err
+		}
+	} else {
+		hits, err = decodeHits[T](result.Hits)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &TypedSearchResult[T]{
@@ -147,10 +154,19 @@ func multiSearchAs[T any](ctx context.Context, gs *GormSearch, queries ...Search
 
 	typedResults := make([]TypedSearchResult[T], 0, len(result.Results))
 	for _, r := range result.Results {
-		hits, err := decodeHits[T](r.Hits)
-		if err != nil {
-			return nil, err
+		var hits []T
+		if gs.config != nil && gs.config.Decoder != nil {
+			if err := gs.config.Decoder(r.Hits, &hits); err != nil {
+				return nil, err
+			}
+		} else {
+			var err error
+			hits, err = decodeHits[T](r.Hits)
+			if err != nil {
+				return nil, err
+			}
 		}
+
 		typedResults = append(typedResults, TypedSearchResult[T]{
 			Hits:              hits,
 			Query:             r.Query,
@@ -232,10 +248,11 @@ func decodeHits[T any](hits []map[string]any) ([]T, error) {
 
 // TypedQuery holds a typed query with its closure-based decoder.
 type TypedQuery struct {
-	indexName string
-	query     string
-	opts      SearchOptions
-	decode    func([]map[string]any) error
+	indexName     string
+	query         string
+	opts          SearchOptions
+	decodeDefault func([]map[string]any) error
+	decodeCustom  func([]map[string]any, Decoder) error
 }
 
 // Query creates a typed query with auto-detected index name.
@@ -252,9 +269,17 @@ func Query[T any](dest *[]T, query string, opts ...SearchOption) TypedQuery {
 		indexName: indexNameFor[T](),
 		query:     query,
 		opts:      options,
-		decode: func(hits []map[string]any) error {
+		decodeDefault: func(hits []map[string]any) error {
 			items, err := decodeHits[T](hits)
 			if err != nil {
+				return err
+			}
+			*dest = items
+			return nil
+		},
+		decodeCustom: func(hits []map[string]any, decoder Decoder) error {
+			var items []T
+			if err := decoder(hits, &items); err != nil {
 				return err
 			}
 			*dest = items
@@ -274,9 +299,17 @@ func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption)
 		indexName: indexName,
 		query:     query,
 		opts:      options,
-		decode: func(hits []map[string]any) error {
+		decodeDefault: func(hits []map[string]any) error {
 			items, err := decodeHits[T](hits)
 			if err != nil {
+				return err
+			}
+			*dest = items
+			return nil
+		},
+		decodeCustom: func(hits []map[string]any, decoder Decoder) error {
+			var items []T
+			if err := decoder(hits, &items); err != nil {
 				return err
 			}
 			*dest = items
@@ -286,21 +319,24 @@ func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption)
 }
 
 // MultiSearch executes multiple typed queries in a single request.
+// It returns a slice of SearchResult containing metadata (Total, Facets, etc.) corresponding to each query.
+// The actual hits are decoded into the destination slices provided in the queries.
 //
 //	var products []Product
 //	var categories []Category
-//	err := gormsearch.MultiSearch(gs,
+//	results, err := gormsearch.MultiSearch(gs,
 //	    gormsearch.Query(&products, "macbook"),
 //	    gormsearch.Query(&categories, "electronics"),
 //	)
-func MultiSearch(gs *GormSearch, queries ...TypedQuery) error {
+//	fmt.Println("Total Products:", results[0].EstimatedTotal)
+func MultiSearch(gs *GormSearch, queries ...TypedQuery) ([]SearchResult, error) {
 	return MultiSearchWithContext(context.Background(), gs, queries...)
 }
 
 // MultiSearchWithContext executes multiple typed queries with context.
-func MultiSearchWithContext(ctx context.Context, gs *GormSearch, queries ...TypedQuery) error {
+func MultiSearchWithContext(ctx context.Context, gs *GormSearch, queries ...TypedQuery) ([]SearchResult, error) {
 	if len(queries) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Build search queries
@@ -319,18 +355,39 @@ func MultiSearchWithContext(ctx context.Context, gs *GormSearch, queries ...Type
 	// Execute multi-search (single HTTP request)
 	results, err := gs.MultiSearchRawWithContext(ctx, searchQueries...)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	metadataResults := make([]SearchResult, 0, len(results.Results))
 
 	// Decode each result using pre-built closures (no reflection)
 	for i, q := range queries {
 		if i >= len(results.Results) {
 			break
 		}
-		if err := q.decode(results.Results[i].Hits); err != nil {
-			return err
+		r := results.Results[i]
+
+		// Save metadata AND hits
+		metadataResults = append(metadataResults, SearchResult{
+			Query:             r.Query,
+			ProcessingTimeMs:  r.ProcessingTimeMs,
+			Limit:             r.Limit,
+			Offset:            r.Offset,
+			EstimatedTotal:    r.EstimatedTotal,
+			FacetDistribution: r.FacetDistribution,
+			Hits:              r.Hits, // Include raw hits
+		})
+
+		if gs.config != nil && gs.config.Decoder != nil {
+			if err := q.decodeCustom(r.Hits, gs.config.Decoder); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := q.decodeDefault(r.Hits); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	return nil
+	return metadataResults, nil
 }

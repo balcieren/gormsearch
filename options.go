@@ -86,3 +86,31 @@ func WithHighlight(attrs ...string) SearchOption {
 		o.Highlight = attrs
 	}
 }
+
+// WithEncoder sets a custom encoder for converting models to Meilisearch documents.
+// Use this to integrate external serialization packages like sonic or msgpack.
+//
+//	gs, _ := gormsearch.New(db, meili,
+//	    gormsearch.WithEncoder(func(model any) (map[string]any, error) {
+//	        // Custom encoding logic
+//	    }),
+//	)
+func WithEncoder(enc Encoder) Option {
+	return func(c *Config) {
+		c.Encoder = enc
+	}
+}
+
+// WithDecoder sets a custom decoder for converting search hits to typed results.
+// The decoder receives raw hits and a pointer to destination slice.
+//
+//	gs, _ := gormsearch.New(db, meili,
+//	    gormsearch.WithDecoder(func(hits []map[string]any, dest any) error {
+//	        // Custom decoding logic
+//	    }),
+//	)
+func WithDecoder(dec Decoder) Option {
+	return func(c *Config) {
+		c.Decoder = dec
+	}
+}

@@ -47,6 +47,14 @@ type Tabler interface {
 	TableName() string
 }
 
+// Encoder encodes a model to a Meilisearch document.
+// Use this to integrate external serialization packages like sonic or msgpack.
+type Encoder func(model any) (map[string]any, error)
+
+// Decoder decodes raw hits into a typed slice destination.
+// The dest parameter should be a pointer to a slice (e.g., *[]Product).
+type Decoder func(hits []map[string]any, dest any) error
+
 // ============================================================================
 // Core Types
 // ============================================================================
@@ -68,6 +76,8 @@ type Config struct {
 	MaxWorkers int
 	MaxRetries int
 	OnError    func(op string, err error)
+	Encoder    Encoder
+	Decoder    Decoder
 }
 
 // IndexConfig holds the parsed configuration for a registered model.

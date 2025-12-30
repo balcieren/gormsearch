@@ -139,13 +139,15 @@ func TestFluentMultiSearch(t *testing.T) {
 	})).Return(mockResponse, nil)
 
 	// Execute fluent API
-	err := MultiSearch(gs,
+	results, err := MultiSearch(gs,
 		Query(&products, "macbook"),
 		Query(&categories, "electronics"),
 	)
 
 	// Verify
 	assert.NoError(t, err)
+	assert.Len(t, results, 2)
+	assert.Len(t, results[0].Hits, 1) // Verify raw hits are present
 
 	// Check products
 	assert.Len(t, products, 1)
