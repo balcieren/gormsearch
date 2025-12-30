@@ -402,107 +402,70 @@ gs, err := gormsearch.New(db, meili,
 
 This changes the internal behavior to pass `json.RawMessage` directly to Meilisearch-go, avoiding unnecessary reflection and map[string]interface{} allocations during sync operations.
 
-## Pluggable Workers (Dispatcher)
+## Async Workers & Queues
 
-By default, `gormsearch` uses an in-memory worker pool. You can implement the `Dispatcher` interface to offload syncing to external queues like NATS, Redis, or Kafka.
+Offload synchronization to external queues like Redis, NATS, or Kafka to ensure your application stays fast.
 
-### Interface
+### 1. Easy Integration (Recommended)
+
+Use `WithQueue` to integrate any queue system in a single line. GormSearch handles the serialization (JSON) automatically.
+
+#### Redis Example
+```go
+// Producer
+gs, _ := gormsearch.New(db, meili,
+    gormsearch.WithQueue(func(ctx context.Context, data []byte) error {
+        return rdb.RPush(ctx, "meili_queue", data).Err()
+    }),
+)
+```
+
+#### NATS Example
+```go
+// Producer
+gs, _ := gormsearch.New(db, meili,
+    gormsearch.WithQueue(func(ctx context.Context, data []byte) error {
+        return nc.Publish("meili.sync", data)
+    }),
+)
+```
+
+#### Consumer (Worker)
+In your worker service, simply pass the received data to `Consume`:
+
+```go
+// Can be used with any queue (Redis, NATS, Kafka, etc.)
+err := gormsearch.Consume(meiliClient, payload)
+```
+
+### 2. Advanced Customization
+
+If you need full control over the job creation logic (e.g., adding custom metadata, changing operation types), use the options ending in `Func`.
+
+#### Custom Dispatcher
+Use `WithDispatcherFunc` to bypass default serialization and handle the raw job struct directly.
+
+```go
+gs, _ := gormsearch.New(db, meili,
+    gormsearch.WithDispatcherFunc(func(ctx context.Context, job gormsearch.Job) error {
+        // Add custom headers or transformation logic
+        return myQueue.Publish(job.IndexName, job)
+    }),
+)
+```
+
+### 3. Interface Implementation (Legacy)
+
+You can also implement the `Dispatcher` interface for complex stateful dispatchers.
 
 ```go
 type Dispatcher interface {
     Dispatch(ctx context.Context, job Job) error
 }
 
-type Job struct {
-    IndexName string
-    Operation string         // "create", "update", "delete"
-    Document  map[string]any // Encoded document
-    ID        string         // Primary Key
-}
-```
-
-### Example: NATS Dispatcher
-
-```go
-type NatsDispatcher struct {
-    nc *nats.Conn
-}
-
-func (d *NatsDispatcher) Dispatch(ctx context.Context, job gormsearch.Job) error {
-    data, _ := json.Marshal(job)
-    return d.nc.Publish("meili.sync", data)
-}
-
-// Usage
 gs, _ := gormsearch.New(db, meili,
-    gormsearch.WithDispatcher(&NatsDispatcher{nc: natsConn}),
+    gormsearch.WithDispatcher(&MyDispatcher{}),
 )
-```
-
-### Example: Functional Dispatcher (Concise)
-
-Use `WithDispatcherFunc` to pass a closure directly:
-
-```go
-gs, _ := gormsearch.New(db, meili,
-    gormsearch.WithDispatcherFunc(func(ctx context.Context, job gormsearch.Job) error {
-        data, _ := json.Marshal(job)
-        return nc.Publish("meili.sync", data)
-    }),
-)
-```
-
-### Example: NATS Consumer (Worker)
-
-You must implement the worker that listens to the queue. Making it work is easy with `gormsearch.ExecuteJob`:
-
-```go
-// In your separate Worker service:
-nc.Subscribe("meili.sync", func(m *nats.Msg) {
-    var job gormsearch.Job
-    if err := json.Unmarshal(m.Data, &job); err != nil {
-        return
-    }
-
-    // One-line execution!
-    err := gormsearch.ExecuteJob(meiliClient, job)
-    if err != nil {
-        log.Println("Sync fail:", err)
-    }
-})
-```
-
-### Example: Redis Dispatcher & Worker
-
-Using Redis Lists (`LPUSH` / `BRPOP`) as a queue.
-
-**Producer (App):**
-```go
-gs, _ := gormsearch.New(db, meili,
-    gormsearch.WithDispatcherFunc(func(ctx context.Context, job gormsearch.Job) error {
-        data, _ := json.Marshal(job)
-        return rdb.LPush(ctx, "meili_queue", data).Err()
-    }),
-)
-```
-
-**Consumer (Worker):**
-```go
-for {
-    // Block until a job is available
-    result, err := rdb.BRPop(ctx, 0, "meili_queue").Result()
-    if err != nil {
-        continue
-    }
-
-    var job gormsearch.Job
-    if err := json.Unmarshal([]byte(result[1]), &job); err != nil {
-        continue
-    }
-
-    // Process job
-    gormsearch.ExecuteJob(meiliClient, job)
-}
 ```
 
 ## Errors

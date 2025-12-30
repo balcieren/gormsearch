@@ -38,9 +38,9 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, job Job) error {
 	return nil
 }
 
-// ExecuteJob applies a job to Meilisearch.
+// Execute applies a job to Meilisearch.
 // Use this function in your external worker (Consumer) to process jobs received from the queue.
-func ExecuteJob(client meilisearch.ServiceManager, job Job) error {
+func Execute(client meilisearch.ServiceManager, job Job) error {
 	index := client.Index(job.IndexName)
 
 	switch job.Operation {
@@ -59,7 +59,7 @@ func ExecuteJob(client meilisearch.ServiceManager, job Job) error {
 }
 
 func (d *DefaultDispatcher) execute(job Job) error {
-	return ExecuteJob(d.client, job)
+	return Execute(d.client, job)
 }
 
 // safeGo executes a function with panic recovery and worker pool.
@@ -132,12 +132,12 @@ func (d *QueueDispatcher) Dispatch(ctx context.Context, job Job) error {
 	return d.publish(ctx, data)
 }
 
-// ConsumeJob deserializes and converts a job from an external queue.
+// Consume deserializes and converts a job from an external queue.
 // This is a helper for consumers.
-func ConsumeJob(client meilisearch.ServiceManager, data []byte) error {
+func Consume(client meilisearch.ServiceManager, data []byte) error {
 	var job Job
 	if err := json.Unmarshal(data, &job); err != nil {
 		return err
 	}
-	return ExecuteJob(client, job)
+	return Execute(client, job)
 }
