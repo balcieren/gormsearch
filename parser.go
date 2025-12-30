@@ -22,6 +22,7 @@ func parseModel(model any) (*IndexConfig, error) {
 		FilterableFields: make([]string, 0),
 		SortableFields:   make([]string, 0),
 		FieldMapping:     make(map[string]fieldInfo),
+		Model:            model,
 	}
 
 	// Parse struct fields
@@ -131,6 +132,9 @@ func parseFieldTags(field reflect.StructField) fieldInfo {
 				info.Sortable = true
 			case "primaryKey":
 				info.PrimaryKey = true
+			case "geo":
+				info.Geo = true
+				info.JSONName = "_geo" // Force standard name for geo fields
 			}
 		}
 	}

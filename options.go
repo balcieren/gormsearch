@@ -1,5 +1,7 @@
 package gormsearch
 
+import "context"
+
 // Option is a functional option for configuring GormSearch.
 type Option func(*Config)
 
@@ -112,5 +114,27 @@ func WithEncoder(enc Encoder) Option {
 func WithDecoder(dec Decoder) Option {
 	return func(c *Config) {
 		c.Decoder = dec
+	}
+}
+
+// WithDispatcher sets a custom dispatcher for async operations.
+func WithDispatcher(d Dispatcher) Option {
+	return func(c *Config) {
+		c.Dispatcher = d
+	}
+}
+
+// WithDispatcherFunc serves as a shortcut for WithDispatcher(DispatcherFunc(fn)).
+// Use this to pass a closure directly.
+func WithDispatcherFunc(fn func(context.Context, Job) error) Option {
+	return func(c *Config) {
+		c.Dispatcher = DispatcherFunc(fn)
+	}
+}
+
+// WithIndexPrefix sets a prefix for all index names (e.g., "prod_", "user_1_").
+func WithIndexPrefix(prefix string) Option {
+	return func(c *Config) {
+		c.IndexPrefix = prefix
 	}
 }

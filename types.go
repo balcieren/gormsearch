@@ -78,6 +78,11 @@ type Job struct {
 	ID        string         // Primary Key value (required for delete)
 }
 
+// SettingProvider is an interface that models can implement to provide custom Meilisearch settings.
+type SettingProvider interface {
+	MeiliSettings() *meilisearch.Settings
+}
+
 // ============================================================================
 // Core Types
 // ============================================================================
@@ -89,19 +94,19 @@ type GormSearch struct {
 	config   *Config
 	registry map[string]*IndexConfig
 	mu       sync.RWMutex
-	pool     *workerPool
 }
 
 // Config holds the configuration options for GormSearch.
 type Config struct {
-	BatchSize  int
-	Async      bool
-	MaxWorkers int
-	MaxRetries int
-	OnError    func(op string, err error)
-	Encoder    Encoder
-	Decoder    Decoder
-	Dispatcher Dispatcher
+	BatchSize   int
+	Async       bool
+	MaxWorkers  int
+	MaxRetries  int
+	OnError     func(op string, err error)
+	Encoder     Encoder
+	Decoder     Decoder
+	Dispatcher  Dispatcher
+	IndexPrefix string
 }
 
 // IndexConfig holds the parsed configuration for a registered model.
@@ -113,6 +118,7 @@ type IndexConfig struct {
 	FilterableFields []string
 	SortableFields   []string
 	FieldMapping     map[string]fieldInfo
+	Model            any // Reference to the original model instance
 }
 
 // fieldInfo holds information about a struct field.
@@ -122,6 +128,7 @@ type fieldInfo struct {
 	Filterable bool
 	Sortable   bool
 	PrimaryKey bool
+	Geo        bool
 	Skip       bool
 }
 

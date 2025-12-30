@@ -253,6 +253,95 @@ err := gs.SyncWithContext(ctx, &Product{})
 gs.Sync(&Product{})
 ```
 
+## Advanced Features
+
+### 1. Index Settings Sync
+
+Implement `SettingProvider` interface to configure advanced settings like synonyms, stop words, and ranking rules.
+
+```go
+func (p Product) MeiliSettings() *meilisearch.Settings {
+    return &meilisearch.Settings{
+        Synonyms: map[string][]string{
+            "phone": {"iphone", "galaxy"},
+        },
+        StopWords: []string{"the", "a", "an"},
+        RankingRules: []string{
+            "words",
+            "typo",
+            "proximity",
+            "attribute",
+            "sort",
+            "exactness",
+        },
+    }
+}
+```
+
+### 2. Geo-Search Support
+
+Tag your struct field with `meili:"geo"`. GormSearch handles the extraction of coordinates.
+Supported fields: `Lat`, `Latitude`, `Lng`, `Lon`, `Longitude`.
+
+```go
+type Place struct {
+    gorm.Model
+    Name     string `meili:"searchable"`
+    Location Location `meili:"geo"`
+}
+
+type Location struct {
+    Lat float64
+    Lng float64
+}
+
+// Search with GeoRadius
+builder := gormsearch.NewFilter().GeoRadius(48.8566, 2.3522, 1000)
+results, _ := gormsearch.SearchFor[Place](gs, "coffee",
+    gormsearch.WithFilter(builder.Build()),
+)
+```
+
+### 3. Complex Filter Builder
+
+Use the fluent `FilterBuilder` to construct type-safe filters.
+
+```go
+f := gormsearch.NewFilter()
+filter := f.Where("category").Eq("electronics").
+    And().
+    Group(func(sub *gormsearch.FilterBuilder) {
+        sub.Where("price").Lt(1000).
+            Or().
+            Where("on_sale").Eq(true)
+    }).
+    Build()
+
+// Result: category = 'electronics' AND (price < 1000 OR on_sale = true)
+```
+
+### 4. Multi-Tenancy
+
+Use `WithIndexPrefix` to isolate indexes for different tenants or environments.
+
+```go
+// Prefix all indexes with "tenant_1_"
+gs, _ := gormsearch.New(db, meili,
+    gormsearch.WithIndexPrefix("tenant_1_"),
+)
+
+gs.Register(&Product{}) // Index Name: "tenant_1_products"
+```
+
+### 5. Bulk Re-Indexer
+
+The `Sync` method is optimized for bulk operations. It uses `FindInBatches` internally to re-index large tables efficiently without memory issues.
+
+```go
+// Efficiently re-index millions of records
+err := gs.Sync(&Product{})
+```
+
 ## Custom Serialization
 
 You can use custom encoder/decoder functions to integrate external serialization libraries like `sonic`, `msgpack`, or `goccy/go-json` for better performance.

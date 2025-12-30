@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -41,6 +42,13 @@ func (gs *GormSearch) toDocument(model any, config *IndexConfig) map[string]any 
 			continue
 		}
 
+		if info.Geo {
+			if geo, ok := extractGeo(value); ok {
+				doc[info.JSONName] = geo
+			}
+			continue
+		}
+
 		doc[info.JSONName] = value.Interface()
 	}
 
@@ -73,7 +81,63 @@ func extractEmbeddedFields(v reflect.Value, config *IndexConfig, result map[stri
 			continue
 		}
 
+		if info.Geo {
+			if geo, ok := extractGeo(v.Field(i)); ok {
+				result[info.JSONName] = geo
+			}
+			continue
+		}
+
 		result[info.JSONName] = v.Field(i).Interface()
+	}
+}
+
+// extractGeo attempts to extract lat/lng from a struct value.
+func extractGeo(v reflect.Value) (map[string]float64, bool) {
+	v = reflectValue(v.Interface())
+	if !v.IsValid() || v.Kind() != reflect.Struct {
+		return nil, false
+	}
+
+	var lat, lng float64
+	var foundLat, foundLng bool
+	t := v.Type()
+
+	for i := 0; i < v.NumField(); i++ {
+		name := strings.ToLower(t.Field(i).Name)
+		val := v.Field(i)
+
+		// Try to convert to float
+		fVal, err := toFloat(val)
+		if err != nil {
+			continue
+		}
+
+		if name == "lat" || name == "latitude" {
+			lat = fVal
+			foundLat = true
+		} else if name == "lng" || name == "lon" || name == "longitude" {
+			lng = fVal
+			foundLng = true
+		}
+	}
+
+	if foundLat && foundLng {
+		return map[string]float64{"lat": lat, "lng": lng}, true
+	}
+	return nil, false
+}
+
+func toFloat(v reflect.Value) (float64, error) {
+	switch v.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return v.Float(), nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(v.Int()), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(v.Uint()), nil
+	default:
+		return 0, fmt.Errorf("not a number")
 	}
 }
 

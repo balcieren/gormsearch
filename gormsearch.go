@@ -41,9 +41,6 @@ func New(db *gorm.DB, client meilisearch.ServiceManager, opts ...Option) (*GormS
 		client:   client,
 		config:   config,
 		registry: make(map[string]*IndexConfig),
-		pool:     newWorkerPool(config.MaxWorkers), // Keep pool for other things for now, or remove if unused? safeGo logic moved to Dispatcher.
-		// Wait, safeGo is still used in hooks.go execWithRetry? No, we removed execWithRetry calls in hooks.go.
-		// But execWithRetry struct method still exists.
 	}, nil
 }
 
@@ -67,6 +64,11 @@ func (gs *GormSearch) Register(model any) error {
 	config, err := parseModel(model)
 	if err != nil {
 		return err
+	}
+
+	// Apply index prefix if configured
+	if gs.config.IndexPrefix != "" {
+		config.IndexName = gs.config.IndexPrefix + config.IndexName
 	}
 
 	// Store in registry (thread-safe)
@@ -98,29 +100,57 @@ func (gs *GormSearch) configureIndex(config *IndexConfig) error {
 		// Index might already exist, continue with settings update
 	}
 
-	// Update searchable attributes
-	if len(config.SearchableFields) > 0 {
-		if _, err := index.UpdateSearchableAttributes(&config.SearchableFields); err != nil {
-			return err
-		}
-	}
+	settings := gs.buildSettings(config)
 
-	// Update filterable attributes
-	if len(config.FilterableFields) > 0 {
-		attrs := toInterfaceSlice(config.FilterableFields)
-		if _, err := index.UpdateFilterableAttributes(&attrs); err != nil {
-			return err
-		}
-	}
-
-	// Update sortable attributes
-	if len(config.SortableFields) > 0 {
-		if _, err := index.UpdateSortableAttributes(&config.SortableFields); err != nil {
+	// Update settings if any attribute is set
+	if hasSettings(settings) {
+		if _, err := index.UpdateSettings(settings); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// buildSettings constructs the final Meilisearch settings by merging custom provider settings and struct tags.
+func (gs *GormSearch) buildSettings(config *IndexConfig) *meilisearch.Settings {
+	var settings *meilisearch.Settings
+
+	// 1. Get settings from provider if available
+	if provider, ok := config.Model.(SettingProvider); ok {
+		settings = provider.MeiliSettings()
+	}
+
+	if settings == nil {
+		settings = &meilisearch.Settings{}
+	}
+
+	// 2. Merge/Fallback to struct tag configurations
+	if len(settings.SearchableAttributes) == 0 && len(config.SearchableFields) > 0 {
+		settings.SearchableAttributes = config.SearchableFields
+	}
+	if len(settings.FilterableAttributes) == 0 && len(config.FilterableFields) > 0 {
+		settings.FilterableAttributes = config.FilterableFields
+	}
+	if len(settings.SortableAttributes) == 0 && len(config.SortableFields) > 0 {
+		settings.SortableAttributes = config.SortableFields
+	}
+
+	return settings
+}
+
+// hasSettings checks if any setting attribute is set.
+func hasSettings(s *meilisearch.Settings) bool {
+	return len(s.SearchableAttributes) > 0 ||
+		len(s.FilterableAttributes) > 0 ||
+		len(s.SortableAttributes) > 0 ||
+		len(s.RankingRules) > 0 ||
+		len(s.StopWords) > 0 ||
+		len(s.Synonyms) > 0 ||
+		s.DistinctAttribute != nil ||
+		s.TypoTolerance != nil ||
+		s.Faceting != nil ||
+		s.Pagination != nil
 }
 
 // toInterfaceSlice converts a string slice to an interface slice.
@@ -150,21 +180,13 @@ func (gs *GormSearch) SyncWithContext(ctx context.Context, model any) error {
 
 	index := gs.client.Index(config.IndexName)
 
-	// Query all records
-	var results []map[string]any
-	if err := gs.db.WithContext(ctx).Model(model).Find(&results).Error; err != nil {
-		return err
-	}
-
-	if len(results) == 0 {
-		return nil
-	}
-
 	pk := config.PrimaryKey
 	opts := &meilisearch.DocumentOptions{PrimaryKey: &pk}
 
-	// Batch upload with context check
-	for i := 0; i < len(results); i += gs.config.BatchSize {
+	// Use FindInBatches to avoid loading all records into memory
+	var results []map[string]any
+
+	err = gs.db.WithContext(ctx).Model(model).FindInBatches(&results, gs.config.BatchSize, func(tx *gorm.DB, batch int) error {
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
@@ -172,18 +194,17 @@ func (gs *GormSearch) SyncWithContext(ctx context.Context, model any) error {
 		default:
 		}
 
-		end := i + gs.config.BatchSize
-		if end > len(results) {
-			end = len(results)
+		if len(results) == 0 {
+			return nil
 		}
 
-		batch := results[i:end]
-		if _, err := index.AddDocumentsWithContext(ctx, batch, opts); err != nil {
+		if _, err := index.AddDocumentsWithContext(ctx, results, opts); err != nil {
 			return err
 		}
-	}
+		return nil
+	}).Error
 
-	return nil
+	return err
 }
 
 // Client returns the underlying Meilisearch client.
