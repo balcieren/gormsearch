@@ -95,3 +95,22 @@ func (d *DefaultDispatcher) retry(fn func() error) error {
 	}
 	return lastErr
 }
+
+// panicError wraps a panic value as an error.
+type panicError struct {
+	value any
+}
+
+func (e *panicError) Error() string {
+	return "panic: " + toString(e.value)
+}
+
+func toString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	if e, ok := v.(error); ok {
+		return e.Error()
+	}
+	return "unknown panic"
+}
