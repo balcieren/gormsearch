@@ -88,11 +88,12 @@ type SettingProvider interface {
 
 // GormSearch is the main struct that bridges GORM and Meilisearch.
 type GormSearch struct {
-	db       *gorm.DB
-	client   meilisearch.ServiceManager
-	config   *Config
-	registry map[string]*IndexConfig
-	mu       sync.RWMutex
+	db             *gorm.DB
+	client         meilisearch.ServiceManager
+	config         *Config
+	registry       map[string]*IndexConfig
+	registryByType map[string]*IndexConfig
+	mu             sync.RWMutex
 }
 
 // Config holds the configuration options for GormSearch.

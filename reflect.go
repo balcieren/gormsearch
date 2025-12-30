@@ -201,20 +201,9 @@ func (gs *GormSearch) decodeDocument(doc map[string]any, dest any) error {
 	v = v.Elem() // Now we have the struct
 
 	// Find config
-	// Since we don't have the index name passed in here easily without changing signature,
-	// We will try to match based on type name from registry.
-	// This is a linear search but registry is small.
-	var config *IndexConfig
+	// Optimization: Use registryByType for O(1) lookup
 	typeName := v.Type().Name()
-
-	// Fast path: Try index name cache first if possible, but here we just iterate registry
-	// Optimization: This iteration is negligible compared to JSON overhead
-	for _, cfg := range gs.registry {
-		if cfg.ModelType == typeName {
-			config = cfg
-			break
-		}
-	}
+	config := gs.registryByType[typeName]
 
 	if config == nil {
 		// If config not found, fallback to JSON (slower but safe)

@@ -38,10 +38,11 @@ func New(db *gorm.DB, client meilisearch.ServiceManager, opts ...Option) (*GormS
 	)
 
 	return &GormSearch{
-		db:       db,
-		client:   client,
-		config:   config,
-		registry: make(map[string]*IndexConfig),
+		db:             db,
+		client:         client,
+		config:         config,
+		registry:       make(map[string]*IndexConfig),
+		registryByType: make(map[string]*IndexConfig),
 	}, nil
 }
 
@@ -75,6 +76,7 @@ func (gs *GormSearch) Register(model any) error {
 	// Store in registry (thread-safe)
 	gs.mu.Lock()
 	gs.registry[config.IndexName] = config
+	gs.registryByType[config.ModelType] = config
 	gs.mu.Unlock()
 
 	// Configure Meilisearch index settings
