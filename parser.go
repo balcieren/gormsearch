@@ -86,8 +86,37 @@ func parseFieldsRecursive(t reflect.Type, config *IndexConfig, parentIndex []int
 			IsGeo:      info.Geo,
 		}
 		copy(extractor.FieldIndex, currIndex)
+
+		// Optimization: Pre-compute Geo field indices
+		if info.Geo {
+			if field.Type.Kind() == reflect.Struct {
+				latIdx, lngIdx := findGeoIndices(field.Type)
+				if latIdx != nil && lngIdx != nil {
+					extractor.GeoLatIndex = latIdx
+					extractor.GeoLngIndex = lngIdx
+				}
+			}
+		}
+
 		config.FieldExtractors = append(config.FieldExtractors, extractor)
 	}
+}
+
+// findGeoIndices searches for Lat/Latitude and Lng/Longitude fields in a struct.
+func findGeoIndices(t reflect.Type) ([]int, []int) {
+	var latIndex, lngIndex []int
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		name := strings.ToLower(field.Name)
+
+		if name == "lat" || name == "latitude" {
+			latIndex = []int{i}
+		} else if name == "lng" || name == "lon" || name == "longitude" {
+			lngIndex = []int{i}
+		}
+	}
+	return latIndex, lngIndex
 }
 
 // parseFieldTags extracts field configuration from struct tags.

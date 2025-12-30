@@ -126,9 +126,11 @@ type IndexConfig struct {
 
 // FieldExtractor holds pre-computed reflection data for field extraction.
 type FieldExtractor struct {
-	FieldIndex []int  // Path to field (indices)
-	JSONName   string // JSON key name
-	IsGeo      bool   // Is this a geo field?
+	FieldIndex  []int  // Path to field (indices)
+	JSONName    string // JSON key name
+	IsGeo       bool   // Is this a geo field?
+	GeoLatIndex []int  // Path to Lat field within Geo struct
+	GeoLngIndex []int  // Path to Lng field within Geo struct
 }
 
 // fieldInfo holds information about a struct field.
