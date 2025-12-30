@@ -2,6 +2,7 @@ package gormsearch
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/meilisearch/meilisearch-go"
@@ -37,9 +38,9 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, job Job) error {
 	return nil
 }
 
-// ExecuteJob applies a job to Meilisearch.
+// Execute applies a job to Meilisearch.
 // Use this function in your external worker (Consumer) to process jobs received from the queue.
-func ExecuteJob(client meilisearch.ServiceManager, job Job) error {
+func Execute(client meilisearch.ServiceManager, job Job) error {
 	index := client.Index(job.IndexName)
 
 	switch job.Operation {
@@ -58,7 +59,7 @@ func ExecuteJob(client meilisearch.ServiceManager, job Job) error {
 }
 
 func (d *DefaultDispatcher) execute(job Job) error {
-	return ExecuteJob(d.client, job)
+	return Execute(d.client, job)
 }
 
 // safeGo executes a function with panic recovery and worker pool.
@@ -114,4 +115,29 @@ func toString(v any) string {
 		return e.Error()
 	}
 	return "unknown panic"
+}
+
+// QueueDispatcher is a dispatcher that publishes jobs to an external queue.
+type QueueDispatcher struct {
+	encoder func(v any) ([]byte, error)
+	publish func(ctx context.Context, data []byte) error
+}
+
+// Dispatch marshals the job and publishes it.
+func (d *QueueDispatcher) Dispatch(ctx context.Context, job Job) error {
+	data, err := d.encoder(job)
+	if err != nil {
+		return err
+	}
+	return d.publish(ctx, data)
+}
+
+// Consume deserializes and converts a job from an external queue.
+// This is a helper for consumers.
+func Consume(client meilisearch.ServiceManager, data []byte) error {
+	var job Job
+	if err := json.Unmarshal(data, &job); err != nil {
+		return err
+	}
+	return Execute(client, job)
 }

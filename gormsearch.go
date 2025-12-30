@@ -4,6 +4,7 @@ package gormsearch
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 
 	"github.com/meilisearch/meilisearch-go"
@@ -30,12 +31,24 @@ func New(db *gorm.DB, client meilisearch.ServiceManager, opts ...Option) (*GormS
 		opt(config)
 	}
 
-	config.Dispatcher = NewDefaultDispatcher(
-		client,
-		config.MaxWorkers,
-		config.MaxRetries,
-		config.OnError,
-	)
+	// Initialize default dispatcher if none provided
+	if config.Dispatcher == nil {
+		config.Dispatcher = NewDefaultDispatcher(
+			client,
+			config.MaxWorkers,
+			config.MaxRetries,
+			config.OnError,
+		)
+	}
+
+	// If using QueueDispatcher, inject the encoder
+	if qd, ok := config.Dispatcher.(*QueueDispatcher); ok {
+		if config.JSONEncoder != nil {
+			qd.encoder = config.JSONEncoder
+		} else {
+			qd.encoder = json.Marshal
+		}
+	}
 
 	return &GormSearch{
 		db:             db,

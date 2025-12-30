@@ -157,3 +157,14 @@ func WithJSONDecoder(fn func(data []byte, v any) error) Option {
 		c.JSONDecoder = fn
 	}
 }
+
+// WithQueue enables the simplified queue dispatcher.
+// It sets up a dispatcher that serializes jobs and calls the provided publish function.
+func WithQueue(publish func(ctx context.Context, data []byte) error) Option {
+	return func(c *Config) {
+		c.Dispatcher = &QueueDispatcher{
+			publish: publish,
+			// Encoder will be injected in New() based on configuration
+		}
+	}
+}
