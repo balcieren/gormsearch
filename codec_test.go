@@ -19,13 +19,16 @@ func TestWithCustomEncoder(t *testing.T) {
 
 	gs := &GormSearch{
 		config: &Config{
-			Encoder: customEncoder,
+			MapEncoder: customEncoder,
 		},
 	}
 
-	doc, err := gs.encodeDocument(struct{}{}, &IndexConfig{})
+	docAny, err := gs.encodeDocument(struct{}{}, &IndexConfig{})
 	assert.NoError(t, err)
 	assert.True(t, encoderCalled)
+
+	doc, ok := docAny.(map[string]any)
+	assert.True(t, ok)
 	assert.Equal(t, "value", doc["custom"])
 }
 
@@ -37,14 +40,14 @@ func TestWithCustomEncoderError(t *testing.T) {
 
 	gs := &GormSearch{
 		config: &Config{
-			Encoder: customEncoder,
+			MapEncoder: customEncoder,
 		},
 	}
 
-	doc, err := gs.encodeDocument(struct{}{}, &IndexConfig{})
+	docAny, err := gs.encodeDocument(struct{}{}, &IndexConfig{})
 	assert.Error(t, err)
 	assert.Equal(t, expectedErr, err)
-	assert.Nil(t, doc)
+	assert.Nil(t, docAny)
 }
 
 func TestWithCustomDecoder(t *testing.T) {
@@ -68,7 +71,7 @@ func TestWithCustomDecoder(t *testing.T) {
 		client:   mockClient,
 		registry: make(map[string]*IndexConfig),
 		config: &Config{
-			Decoder: customDecoder,
+			MapDecoder: customDecoder,
 		},
 	}
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}
@@ -98,7 +101,7 @@ func TestWithCustomDecoderError(t *testing.T) {
 		client:   mockClient,
 		registry: make(map[string]*IndexConfig),
 		config: &Config{
-			Decoder: customDecoder,
+			MapDecoder: customDecoder,
 		},
 	}
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}

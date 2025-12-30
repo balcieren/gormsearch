@@ -44,10 +44,11 @@ func ExecuteJob(client meilisearch.ServiceManager, job Job) error {
 
 	switch job.Operation {
 	case "create":
-		_, err := index.AddDocuments([]map[string]any{job.Document}, nil)
+		// Wrap in []any to support both map[string]any and json.RawMessage
+		_, err := index.AddDocuments([]any{job.Document}, nil)
 		return err
 	case "update":
-		_, err := index.UpdateDocuments([]map[string]any{job.Document}, nil)
+		_, err := index.UpdateDocuments([]any{job.Document}, nil)
 		return err
 	case "delete":
 		_, err := index.DeleteDocument(job.ID, nil)

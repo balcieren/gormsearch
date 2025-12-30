@@ -4,6 +4,7 @@ package gormsearch
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/meilisearch/meilisearch-go"
 	"gorm.io/gorm"
@@ -183,10 +184,16 @@ func (gs *GormSearch) SyncWithContext(ctx context.Context, model any) error {
 	pk := config.PrimaryKey
 	opts := &meilisearch.DocumentOptions{PrimaryKey: &pk}
 
-	// Use FindInBatches to avoid loading all records into memory
-	var results []map[string]any
+	// Create a slice of the model type to load data into
+	// We need a pointer to a slice of structs
+	modelType := reflect.TypeOf(model)
+	if modelType.Kind() == reflect.Ptr {
+		modelType = modelType.Elem()
+	}
+	sliceType := reflect.SliceOf(modelType)
+	slicePtr := reflect.New(sliceType)
 
-	err = gs.db.WithContext(ctx).Model(model).FindInBatches(&results, gs.config.BatchSize, func(tx *gorm.DB, batch int) error {
+	err = gs.db.WithContext(ctx).Model(model).FindInBatches(slicePtr.Interface(), gs.config.BatchSize, func(tx *gorm.DB, batch int) error {
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
@@ -194,12 +201,33 @@ func (gs *GormSearch) SyncWithContext(ctx context.Context, model any) error {
 		default:
 		}
 
-		if len(results) == 0 {
+		// Get the slice value
+		sliceVal := slicePtr.Elem()
+		if sliceVal.Len() == 0 {
 			return nil
 		}
 
-		if _, err := index.AddDocumentsWithContext(ctx, results, opts); err != nil {
-			return err
+		documents := make([]any, 0, sliceVal.Len())
+
+		for i := 0; i < sliceVal.Len(); i++ {
+			item := sliceVal.Index(i).Interface()
+			// Encode each document using our standard logic (JSONEncoder or Reflection)
+			doc, err := gs.encodeDocument(item, config)
+			if err != nil {
+				// Log error and continue? Or fail batch?
+				// Using OnError callback if available, but for Sync we might want to return error
+				if gs.config.OnError != nil {
+					gs.config.OnError("sync_encode", err)
+				}
+				continue
+			}
+			documents = append(documents, doc)
+		}
+
+		if len(documents) > 0 {
+			if _, err := index.AddDocumentsWithContext(ctx, documents, opts); err != nil {
+				return err
+			}
 		}
 		return nil
 	}).Error

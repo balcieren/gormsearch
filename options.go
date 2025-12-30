@@ -97,9 +97,11 @@ func WithHighlight(attrs ...string) SearchOption {
 //	        // Custom encoding logic
 //	    }),
 //	)
-func WithEncoder(enc Encoder) Option {
+//
+// WithMapEncoder sets a custom map encoder function.
+func WithMapEncoder(enc MapEncoder) Option {
 	return func(c *Config) {
-		c.Encoder = enc
+		c.MapEncoder = enc
 	}
 }
 
@@ -111,9 +113,11 @@ func WithEncoder(enc Encoder) Option {
 //	        // Custom decoding logic
 //	    }),
 //	)
-func WithDecoder(dec Decoder) Option {
+//
+// WithMapDecoder sets a custom map decoder function.
+func WithMapDecoder(dec MapDecoder) Option {
 	return func(c *Config) {
-		c.Decoder = dec
+		c.MapDecoder = dec
 	}
 }
 
@@ -136,5 +140,20 @@ func WithDispatcherFunc(fn func(context.Context, Job) error) Option {
 func WithIndexPrefix(prefix string) Option {
 	return func(c *Config) {
 		c.IndexPrefix = prefix
+	}
+}
+
+// WithJSONEncoder sets the JSON encoder function (e.g., json.Marshal).
+// Perfect for high-performance libraries like sonic or go-json.
+func WithJSONEncoder(fn func(v any) ([]byte, error)) Option {
+	return func(c *Config) {
+		c.JSONEncoder = fn
+	}
+}
+
+// WithJSONDecoder sets the JSON decoder function (e.g., json.Unmarshal).
+func WithJSONDecoder(fn func(data []byte, v any) error) Option {
+	return func(c *Config) {
+		c.JSONDecoder = fn
 	}
 }

@@ -29,6 +29,14 @@ func (m *MockClient) MultiSearchWithContext(ctx context.Context, request *meilis
 	return args.Get(0).(*meilisearch.MultiSearchResponse), args.Error(1)
 }
 
+func (m *MockClient) CreateIndex(config *meilisearch.IndexConfig) (*meilisearch.TaskInfo, error) {
+	args := m.Called(config)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*meilisearch.TaskInfo), args.Error(1)
+}
+
 // MockIndex is a mock for meilisearch.IndexManager
 type MockIndex struct {
 	mock.Mock
@@ -41,6 +49,14 @@ func (m *MockIndex) SearchWithContext(ctx context.Context, query string, request
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*meilisearch.SearchResponse), args.Error(1)
+}
+
+func (m *MockIndex) UpdateSettings(settings *meilisearch.Settings) (*meilisearch.TaskInfo, error) {
+	args := m.Called(settings)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*meilisearch.TaskInfo), args.Error(1)
 }
 
 // Test Models for Generics

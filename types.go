@@ -48,13 +48,12 @@ type Tabler interface {
 	TableName() string
 }
 
-// Encoder encodes a model to a Meilisearch document.
-// Use this to integrate external serialization packages like sonic or msgpack.
-type Encoder func(model any) (map[string]any, error)
+// MapEncoder encodes a model to a Meilisearch document (map).
+type MapEncoder func(model any) (map[string]any, error)
 
-// Decoder decodes raw hits into a typed slice destination.
+// MapDecoder decodes raw hits into a typed slice destination.
 // The dest parameter should be a pointer to a slice (e.g., *[]Product).
-type Decoder func(hits []map[string]any, dest any) error
+type MapDecoder func(hits []map[string]any, dest any) error
 
 // Dispatcher abstracts the execution of a search sync operation.
 // Implement this interface to support external queues (NATS, Redis, Kafka).
@@ -73,9 +72,9 @@ func (f DispatcherFunc) Dispatch(ctx context.Context, job Job) error {
 // Job represents a unit of work to be synced to Meilisearch.
 type Job struct {
 	IndexName string
-	Operation string         // "create", "update", "delete"
-	Document  map[string]any // Encoded document (nil for delete)
-	ID        string         // Primary Key value (required for delete)
+	Operation string // "create", "update", "delete"
+	Document  any    // Encoded document (nil for delete)
+	ID        string // Primary Key value (required for delete)
 }
 
 // SettingProvider is an interface that models can implement to provide custom Meilisearch settings.
@@ -98,13 +97,16 @@ type GormSearch struct {
 
 // Config holds the configuration options for GormSearch.
 type Config struct {
-	BatchSize   int
-	Async       bool
-	MaxWorkers  int
-	MaxRetries  int
-	OnError     func(op string, err error)
-	Encoder     Encoder
-	Decoder     Decoder
+	BatchSize  int
+	Async      bool
+	MaxWorkers int
+	MaxRetries int
+	OnError    func(op string, err error)
+	MapEncoder MapEncoder
+	MapDecoder MapDecoder
+	// JSON marshaling configuration
+	JSONEncoder func(v any) ([]byte, error)
+	JSONDecoder func(data []byte, v any) error
 	Dispatcher  Dispatcher
 	IndexPrefix string
 }

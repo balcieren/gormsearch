@@ -346,11 +346,11 @@ err := gs.Sync(&Product{})
 
 You can use custom encoder/decoder functions to integrate external serialization libraries like `sonic`, `msgpack`, or `goccy/go-json` for better performance.
 
-### Custom Encoder
+### Custom Map Encoder (Legacy Style)
 
 ```go
 gs, err := gormsearch.New(db, meili,
-    gormsearch.WithEncoder(func(model any) (map[string]any, error) {
+    gormsearch.WithMapEncoder(func(model any) (map[string]any, error) {
         // Use custom logic to convert model to map
         // e.g., using sonic
         data, err := sonic.Marshal(model)
@@ -364,11 +364,11 @@ gs, err := gormsearch.New(db, meili,
 )
 ```
 
-### Custom Decoder
+### Custom Map Decoder (Legacy Style)
 
 ```go
 gs, err := gormsearch.New(db, meili,
-    gormsearch.WithDecoder(func(hits []map[string]any, dest any) error {
+    gormsearch.WithMapDecoder(func(hits []map[string]any, dest any) error {
         // Use custom logic to decode hits into dest
         data, err := sonic.Marshal(hits)
         if err != nil {
@@ -378,6 +378,22 @@ gs, err := gormsearch.New(db, meili,
     }),
 )
 ```
+
+## High Performance JSON
+
+You can easily integrate high-performance JSON libraries like [`sonic`](https://github.com/bytedance/sonic) or [`go-json`](https://github.com/goccy/go-json) using the `WithJSONEncoder` and `WithJSONDecoder` options. This allows you to bypass the standard `encoding/json` library and map conversions for maximum speed.
+
+```go
+import "github.com/bytedance/sonic"
+
+gs, err := gormsearch.New(db, meili,
+    // Use sonic for encoding/decoding
+    gormsearch.WithJSONEncoder(sonic.Marshal),
+    gormsearch.WithJSONDecoder(sonic.Unmarshal),
+)
+```
+
+This changes the internal behavior to pass `json.RawMessage` directly to Meilisearch-go, avoiding unnecessary reflection and map[string]interface{} allocations during sync operations.
 
 ## Pluggable Workers (Dispatcher)
 
