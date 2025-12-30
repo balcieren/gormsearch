@@ -176,9 +176,12 @@ func mergeFieldMappings(main, embedded *IndexConfig) {
 }
 
 // toSnakeCase converts CamelCase to snake_case.
+// defaultNamingStrategy is efficient to reuse as it's stateless for standard usage.
+var defaultNamingStrategy = schema.NamingStrategy{}
+
+// toSnakeCase converts CamelCase to snake_case.
 func toSnakeCase(s string) string {
-	namingStrategy := schema.NamingStrategy{}
-	return namingStrategy.ColumnName("", s)
+	return defaultNamingStrategy.ColumnName("", s)
 }
 
 // resolveIndexName determines the index name with priority:

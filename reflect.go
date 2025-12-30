@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// timeType is cached to avoid repeated reflection lookups
+var timeType = reflect.TypeOf(time.Time{})
+
 // encodeDocument encodes a model using custom encoder or default reflection.
 func (gs *GormSearch) encodeDocument(model any, config *IndexConfig) (any, error) {
 	if gs.config != nil {
@@ -285,7 +288,7 @@ func setFieldValue(field reflect.Value, val any) {
 		}
 	case reflect.Struct:
 		// Handle time.Time
-		if field.Type() == reflect.TypeOf(time.Time{}) {
+		if field.Type() == timeType {
 			if v, ok := val.(string); ok {
 				if t, err := time.Parse(time.RFC3339, v); err == nil {
 					field.Set(reflect.ValueOf(t))
