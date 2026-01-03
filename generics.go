@@ -36,7 +36,6 @@ type TypedMultiSearchResult[T any] struct {
 type Searcher[T any] struct {
 	gs        *GormSearch
 	indexName string
-	ctx       context.Context
 }
 
 // Of creates a typed searcher for the given GormSearch instance.
@@ -47,7 +46,6 @@ func Of[T any](gs *GormSearch) *Searcher[T] {
 	return &Searcher[T]{
 		gs:        gs,
 		indexName: indexNameFor[T](),
-		ctx:       context.Background(),
 	}
 }
 
@@ -56,25 +54,24 @@ func Of[T any](gs *GormSearch) *Searcher[T] {
 //	results, _ := products.WithContext(ctx).Search("macbook")
 func (s *Searcher[T]) WithContext(ctx context.Context) *Searcher[T] {
 	return &Searcher[T]{
-		gs:        s.gs,
+		gs:        s.gs.WithContext(ctx),
 		indexName: s.indexName,
-		ctx:       ctx,
 	}
 }
 
 // Search performs a typed search with auto-detected index name.
 func (s *Searcher[T]) Search(query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](s.ctx, s.gs, s.indexName, query, opts...)
+	return searchAs[T](s.gs, s.indexName, query, opts...)
 }
 
 // SearchIndex performs a typed search on a specific index.
 func (s *Searcher[T]) SearchIndex(indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](s.ctx, s.gs, indexName, query, opts...)
+	return searchAs[T](s.gs, indexName, query, opts...)
 }
 
 // MultiSearch performs a typed multi-search.
 func (s *Searcher[T]) MultiSearch(queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	return multiSearchAs[T](s.ctx, s.gs, queries...)
+	return multiSearchAs[T](s.gs, queries...)
 }
 
 // ============================================================================
@@ -84,41 +81,30 @@ func (s *Searcher[T]) MultiSearch(queries ...SearchQuery) (*TypedMultiSearchResu
 // SearchFor performs a typed search with auto-detected index name.
 //
 //	results, _ := gormsearch.SearchFor[Product](gs, "macbook")
+//
+// SearchFor performs a typed search with auto-detected index name.
+//
+//	results, _ := gormsearch.SearchFor[Product](gs, "macbook")
 func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](context.Background(), gs, indexNameFor[T](), query, opts...)
-}
-
-// SearchForWithContext performs a typed search with context.
-func SearchForWithContext[T any](ctx context.Context, gs *GormSearch, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](ctx, gs, indexNameFor[T](), query, opts...)
+	return searchAs[T](gs, indexNameFor[T](), query, opts...)
 }
 
 // SearchAs performs a typed search with explicit index name.
 func SearchAs[T any](gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](context.Background(), gs, indexName, query, opts...)
-}
-
-// SearchAsWithContext performs a typed search with context and explicit index name.
-func SearchAsWithContext[T any](ctx context.Context, gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](ctx, gs, indexName, query, opts...)
+	return searchAs[T](gs, indexName, query, opts...)
 }
 
 // MultiSearchAs performs a typed multi-search.
 func MultiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	return multiSearchAs[T](context.Background(), gs, queries...)
-}
-
-// MultiSearchAsWithContext performs a typed multi-search with context.
-func MultiSearchAsWithContext[T any](ctx context.Context, gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	return multiSearchAs[T](ctx, gs, queries...)
+	return multiSearchAs[T](gs, queries...)
 }
 
 // ============================================================================
 // Internal
 // ============================================================================
 
-func searchAs[T any](ctx context.Context, gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	result, err := gs.SearchWithContext(ctx, indexName, query, opts...)
+func searchAs[T any](gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
+	result, err := gs.Search(indexName, query, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +132,8 @@ func searchAs[T any](ctx context.Context, gs *GormSearch, indexName, query strin
 	}, nil
 }
 
-func multiSearchAs[T any](ctx context.Context, gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	result, err := gs.MultiSearchRawWithContext(ctx, queries...)
+func multiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
+	result, err := gs.MultiSearchRaw(queries...)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +254,7 @@ type TypedQuery struct {
 	indexName     string
 	query         string
 	opts          SearchOptions
-	decodeDefault func([]map[string]any) error
+	decodeDefault func(*GormSearch, []map[string]any) error
 	decodeCustom  func([]map[string]any, MapDecoder) error
 }
 
@@ -286,13 +272,9 @@ func Query[T any](dest *[]T, query string, opts ...SearchOption) TypedQuery {
 		indexName: indexNameFor[T](),
 		query:     query,
 		opts:      options,
-		decodeDefault: func(hits []map[string]any) error {
-			// Note: We don't have 'gs' here in the closure builder easily without major API change.
-			// However, this closure is called by MultiSearch which DOES have 'gs'.
-			// Design limitation: TypedQuery struct doesn't know about GS instance until execution.
-			// For MultiSearch optimization, we need to handle it in MultiSearch function loop.
-			// Reverting to decodeHits here for safety, but MultiSearch implementation will override it.
-			items, err := decodeHits[T](hits)
+		decodeDefault: func(gs *GormSearch, hits []map[string]any) error {
+			// Use optimized decoder that needs GS instance
+			items, err := decodeHitsWithInstance[T](gs, hits)
 			if err != nil {
 				return err
 			}
@@ -321,8 +303,8 @@ func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption)
 		indexName: indexName,
 		query:     query,
 		opts:      options,
-		decodeDefault: func(hits []map[string]any) error {
-			items, err := decodeHits[T](hits)
+		decodeDefault: func(gs *GormSearch, hits []map[string]any) error {
+			items, err := decodeHitsWithInstance[T](gs, hits)
 			if err != nil {
 				return err
 			}
@@ -346,17 +328,12 @@ func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption)
 //
 //	var products []Product
 //	var categories []Category
-//	results, err := gormsearch.MultiSearch(gs,
+//	results, err := gs.MultiSearch(
 //	    gormsearch.Query(&products, "macbook"),
 //	    gormsearch.Query(&categories, "electronics"),
 //	)
 //	fmt.Println("Total Products:", results[0].EstimatedTotal)
-func MultiSearch(gs *GormSearch, queries ...TypedQuery) ([]SearchResult, error) {
-	return MultiSearchWithContext(context.Background(), gs, queries...)
-}
-
-// MultiSearchWithContext executes multiple typed queries with context.
-func MultiSearchWithContext(ctx context.Context, gs *GormSearch, queries ...TypedQuery) ([]SearchResult, error) {
+func (gs *GormSearch) MultiSearch(queries ...TypedQuery) ([]SearchResult, error) {
 	if len(queries) == 0 {
 		return nil, nil
 	}
@@ -375,7 +352,7 @@ func MultiSearchWithContext(ctx context.Context, gs *GormSearch, queries ...Type
 	}
 
 	// Execute multi-search (single HTTP request)
-	results, err := gs.MultiSearchRawWithContext(ctx, searchQueries...)
+	results, err := gs.MultiSearchRaw(searchQueries...)
 	if err != nil {
 		return nil, err
 	}
@@ -405,26 +382,8 @@ func MultiSearchWithContext(ctx context.Context, gs *GormSearch, queries ...Type
 				return nil, err
 			}
 		} else {
-			// Optimized path: Use reflection decoder instead of closure default
-			// We manually invoke the optimized decoder here because we have access to 'gs'
-			// The decodeDefault closure in TypedQuery uses the slow JSON path.
-			// We can bypass it if we can determine the type T, but T is erased here.
-			// Actually, we can't easily inject T here because queries...TypedQuery are heterogenous in destination but homogenous in struct type TypedQuery.
-			// HOWEVER, TypedQuery's decodeDefault is a closure that captures *dest.
-			// We cannot easily change the implementation of that closure from outside.
-			//
-			// Workaround: We will let decodeDefault run (slow) OR we update TypedQuery to accept a decoder function?
-			// The current implementation of TypedQuery is:
-			// decodeDefault: func(hits) { dest = decodeHits[T](hits) }
-			// We want: func(hits) { dest = decodeHitsWithInstance[T](gs, hits) }
-			//
-			// Since 'gs' is not available at Query() time, we can't capture it.
-			// BUT, we can just let it be slow for MultiSearch for now to avoid breaking API,
-			// OR we update `decodeDefault` to accept `gs` as context?
-			//
-			// Let's stick with the default implementation for now to avoid compilation errors,
-			// as TypedQuery refactoring would be larger.
-			if err := q.decodeDefault(r.Hits); err != nil {
+			// Optimized path: Use reflection decoder via closure
+			if err := q.decodeDefault(gs, r.Hits); err != nil {
 				return nil, err
 			}
 		}

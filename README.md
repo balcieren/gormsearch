@@ -143,7 +143,7 @@ var categories []Category
 var users []User
 
 // Single HTTP request, multiple types
-results, err := gormsearch.MultiSearch(gs,
+results, err := gs.MultiSearch(
     gormsearch.Query(&products, "macbook"),
     gormsearch.Query(&categories, "electronics"),
     gormsearch.Query(&users, "john", gormsearch.WithLimit(5)),
@@ -156,13 +156,13 @@ if err == nil {
 }
 
 // With context
-results, err := gormsearch.MultiSearchWithContext(ctx, gs,
+results, err := gs.WithContext(ctx).MultiSearch(
     gormsearch.Query(&products, "macbook"),
     gormsearch.Query(&categories, "electronics"),
 )
 
 // With explicit index name
-results, err := gormsearch.MultiSearch(gs,
+results, err := gs.MultiSearch(
     gormsearch.QueryIndex(&products, "custom_index", "macbook"),
 )
 ```
@@ -238,13 +238,13 @@ ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 
 // Context-aware search
-results, err := gs.SearchWithContext(ctx, "products", "query")
+results, err := gs.WithContext(ctx).Search("products", "query")
 
 // Context-aware multi-search
-results, err := gs.MultiSearchRawWithContext(ctx, queries...)
+results, err := gs.WithContext(ctx).MultiSearchRaw(queries...)
 
 // Context-aware sync
-err := gs.SyncWithContext(ctx, &Product{})
+err := gs.WithContext(ctx).Sync(&Product{})
 ```
 
 ### Sync

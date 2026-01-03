@@ -3,6 +3,7 @@ package gormsearch
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/meilisearch/meilisearch-go"
@@ -82,6 +83,8 @@ func TestSearchFor(t *testing.T) {
 	gs := &GormSearch{
 		client:   mockClient,
 		registry: make(map[string]*IndexConfig),
+		mu:       &sync.RWMutex{},
+		ctx:      context.Background(),
 	}
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}
 
@@ -117,6 +120,8 @@ func TestFluentMultiSearch(t *testing.T) {
 	gs := &GormSearch{
 		client:   mockClient,
 		registry: make(map[string]*IndexConfig),
+		mu:       &sync.RWMutex{},
+		ctx:      context.Background(),
 	}
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}
 	gs.registry["categories"] = &IndexConfig{IndexName: "categories"}
@@ -155,7 +160,7 @@ func TestFluentMultiSearch(t *testing.T) {
 	})).Return(mockResponse, nil)
 
 	// Execute fluent API
-	results, err := MultiSearch(gs,
+	results, err := gs.MultiSearch(
 		Query(&products, "macbook"),
 		Query(&categories, "electronics"),
 	)
@@ -182,6 +187,8 @@ func TestOfSearcher(t *testing.T) {
 	gs := &GormSearch{
 		client:   mockClient,
 		registry: make(map[string]*IndexConfig),
+		mu:       &sync.RWMutex{},
+		ctx:      context.Background(),
 	}
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}
 

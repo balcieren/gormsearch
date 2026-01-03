@@ -9,11 +9,11 @@ import (
 
 // Search performs a search query on the specified index.
 func (gs *GormSearch) Search(indexName, query string, opts ...SearchOption) (*SearchResult, error) {
-	return gs.SearchWithContext(context.Background(), indexName, query, opts...)
-}
+	ctx := gs.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-// SearchWithContext performs a search query with context for timeout/cancellation.
-func (gs *GormSearch) SearchWithContext(ctx context.Context, indexName, query string, opts ...SearchOption) (*SearchResult, error) {
 	if _, exists := gs.getConfig(indexName); !exists {
 		return nil, ErrIndexNotRegistered
 	}
@@ -72,11 +72,11 @@ func (gs *GormSearch) SearchWithContext(ctx context.Context, indexName, query st
 
 // MultiSearchRaw performs search across multiple indexes in a single request.
 func (gs *GormSearch) MultiSearchRaw(queries ...SearchQuery) (*MultiSearchResult, error) {
-	return gs.MultiSearchRawWithContext(context.Background(), queries...)
-}
+	ctx := gs.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-// MultiSearchRawWithContext performs multi-search with context for timeout/cancellation.
-func (gs *GormSearch) MultiSearchRawWithContext(ctx context.Context, queries ...SearchQuery) (*MultiSearchResult, error) {
 	if len(queries) == 0 {
 		return nil, ErrNoQueries
 	}

@@ -1,8 +1,10 @@
 package gormsearch
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/meilisearch/meilisearch-go"
@@ -21,6 +23,8 @@ func TestWithCustomEncoder(t *testing.T) {
 		config: &Config{
 			MapEncoder: customEncoder,
 		},
+		mu:  &sync.RWMutex{},
+		ctx: context.Background(),
 	}
 
 	docAny, err := gs.encodeDocument(struct{}{}, &IndexConfig{})
@@ -42,6 +46,8 @@ func TestWithCustomEncoderError(t *testing.T) {
 		config: &Config{
 			MapEncoder: customEncoder,
 		},
+		mu:  &sync.RWMutex{},
+		ctx: context.Background(),
 	}
 
 	docAny, err := gs.encodeDocument(struct{}{}, &IndexConfig{})
@@ -73,6 +79,8 @@ func TestWithCustomDecoder(t *testing.T) {
 		config: &Config{
 			MapDecoder: customDecoder,
 		},
+		mu:  &sync.RWMutex{},
+		ctx: context.Background(),
 	}
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}
 
@@ -103,6 +111,8 @@ func TestWithCustomDecoderError(t *testing.T) {
 		config: &Config{
 			MapDecoder: customDecoder,
 		},
+		mu:  &sync.RWMutex{},
+		ctx: context.Background(),
 	}
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}
 
