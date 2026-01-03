@@ -160,7 +160,7 @@ func TestFluentMultiSearch(t *testing.T) {
 	})).Return(mockResponse, nil)
 
 	// Execute fluent API
-	results, err := MultiSearch(gs,
+	results, err := gs.MultiSearch(
 		Query(&products, "macbook"),
 		Query(&categories, "electronics"),
 	)

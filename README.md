@@ -143,7 +143,7 @@ var categories []Category
 var users []User
 
 // Single HTTP request, multiple types
-results, err := gormsearch.MultiSearch(gs,
+results, err := gs.MultiSearch(
     gormsearch.Query(&products, "macbook"),
     gormsearch.Query(&categories, "electronics"),
     gormsearch.Query(&users, "john", gormsearch.WithLimit(5)),
@@ -156,13 +156,13 @@ if err == nil {
 }
 
 // With context
-results, err := gormsearch.MultiSearch(gs.WithContext(ctx),
+results, err := gs.WithContext(ctx).MultiSearch(
     gormsearch.Query(&products, "macbook"),
     gormsearch.Query(&categories, "electronics"),
 )
 
 // With explicit index name
-results, err := gormsearch.MultiSearch(gs,
+results, err := gs.MultiSearch(
     gormsearch.QueryIndex(&products, "custom_index", "macbook"),
 )
 ```

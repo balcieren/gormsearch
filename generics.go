@@ -254,7 +254,7 @@ type TypedQuery struct {
 	indexName     string
 	query         string
 	opts          SearchOptions
-	decodeDefault func([]map[string]any) error
+	decodeDefault func(*GormSearch, []map[string]any) error
 	decodeCustom  func([]map[string]any, MapDecoder) error
 }
 
@@ -272,13 +272,9 @@ func Query[T any](dest *[]T, query string, opts ...SearchOption) TypedQuery {
 		indexName: indexNameFor[T](),
 		query:     query,
 		opts:      options,
-		decodeDefault: func(hits []map[string]any) error {
-			// Note: We don't have 'gs' here in the closure builder easily without major API change.
-			// However, this closure is called by MultiSearch which DOES have 'gs'.
-			// Design limitation: TypedQuery struct doesn't know about GS instance until execution.
-			// For MultiSearch optimization, we need to handle it in MultiSearch function loop.
-			// Reverting to decodeHits here for safety, but MultiSearch implementation will override it.
-			items, err := decodeHits[T](hits)
+		decodeDefault: func(gs *GormSearch, hits []map[string]any) error {
+			// Use optimized decoder that needs GS instance
+			items, err := decodeHitsWithInstance[T](gs, hits)
 			if err != nil {
 				return err
 			}
@@ -307,8 +303,8 @@ func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption)
 		indexName: indexName,
 		query:     query,
 		opts:      options,
-		decodeDefault: func(hits []map[string]any) error {
-			items, err := decodeHits[T](hits)
+		decodeDefault: func(gs *GormSearch, hits []map[string]any) error {
+			items, err := decodeHitsWithInstance[T](gs, hits)
 			if err != nil {
 				return err
 			}
@@ -332,12 +328,12 @@ func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption)
 //
 //	var products []Product
 //	var categories []Category
-//	results, err := gormsearch.MultiSearch(gs,
+//	results, err := gs.MultiSearch(
 //	    gormsearch.Query(&products, "macbook"),
 //	    gormsearch.Query(&categories, "electronics"),
 //	)
 //	fmt.Println("Total Products:", results[0].EstimatedTotal)
-func MultiSearch(gs *GormSearch, queries ...TypedQuery) ([]SearchResult, error) {
+func (gs *GormSearch) MultiSearch(queries ...TypedQuery) ([]SearchResult, error) {
 	if len(queries) == 0 {
 		return nil, nil
 	}
@@ -386,26 +382,8 @@ func MultiSearch(gs *GormSearch, queries ...TypedQuery) ([]SearchResult, error) 
 				return nil, err
 			}
 		} else {
-			// Optimized path: Use reflection decoder instead of closure default
-			// We manually invoke the optimized decoder here because we have access to 'gs'
-			// The decodeDefault closure in TypedQuery uses the slow JSON path.
-			// We can bypass it if we can determine the type T, but T is erased here.
-			// Actually, we can't easily inject T here because queries...TypedQuery are heterogenous in destination but homogenous in struct type TypedQuery.
-			// HOWEVER, TypedQuery's decodeDefault is a closure that captures *dest.
-			// We cannot easily change the implementation of that closure from outside.
-			//
-			// Workaround: We will let decodeDefault run (slow) OR we update TypedQuery to accept a decoder function?
-			// The current implementation of TypedQuery is:
-			// decodeDefault: func(hits) { dest = decodeHits[T](hits) }
-			// We want: func(hits) { dest = decodeHitsWithInstance[T](gs, hits) }
-			//
-			// Since 'gs' is not available at Query() time, we can't capture it.
-			// BUT, we can just let it be slow for MultiSearch for now to avoid compilation errors,
-			// OR we update `decodeDefault` to accept `gs` as context?
-			//
-			// Let's stick with the default implementation for now to avoid compilation errors,
-			// as TypedQuery refactoring would be larger.
-			if err := q.decodeDefault(r.Hits); err != nil {
+			// Optimized path: Use reflection decoder via closure
+			if err := q.decodeDefault(gs, r.Hits); err != nil {
 				return nil, err
 			}
 		}
