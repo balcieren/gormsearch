@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"sync"
 
 	"github.com/meilisearch/meilisearch-go"
 	"gorm.io/gorm"
@@ -56,7 +57,17 @@ func New(db *gorm.DB, client meilisearch.ServiceManager, opts ...Option) (*GormS
 		config:         config,
 		registry:       make(map[string]*IndexConfig),
 		registryByType: make(map[string]*IndexConfig),
+		mu:             &sync.RWMutex{},
+		ctx:            context.Background(),
 	}, nil
+}
+
+// WithContext returns a shallow copy of GormSearch with the given context.
+// This allows chaining methods with a request-scoped context.
+func (gs *GormSearch) WithContext(ctx context.Context) *GormSearch {
+	newGS := *gs
+	newGS.ctx = ctx
+	return &newGS
 }
 
 // MustNew creates a new GormSearch instance, panics on error.
@@ -180,11 +191,11 @@ func toInterfaceSlice(s []string) []any {
 
 // Sync manually syncs all records of a model to Meilisearch.
 func (gs *GormSearch) Sync(model any) error {
-	return gs.SyncWithContext(context.Background(), model)
-}
+	ctx := gs.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-// SyncWithContext syncs all records with context for timeout/cancellation.
-func (gs *GormSearch) SyncWithContext(ctx context.Context, model any) error {
 	if model == nil {
 		return ErrNilModel
 	}

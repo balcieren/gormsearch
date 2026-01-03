@@ -156,7 +156,7 @@ if err == nil {
 }
 
 // With context
-results, err := gormsearch.MultiSearchWithContext(ctx, gs,
+results, err := gormsearch.MultiSearch(gs.WithContext(ctx),
     gormsearch.Query(&products, "macbook"),
     gormsearch.Query(&categories, "electronics"),
 )
@@ -238,13 +238,13 @@ ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 
 // Context-aware search
-results, err := gs.SearchWithContext(ctx, "products", "query")
+results, err := gs.WithContext(ctx).Search("products", "query")
 
 // Context-aware multi-search
-results, err := gs.MultiSearchRawWithContext(ctx, queries...)
+results, err := gs.WithContext(ctx).MultiSearchRaw(queries...)
 
 // Context-aware sync
-err := gs.SyncWithContext(ctx, &Product{})
+err := gs.WithContext(ctx).Sync(&Product{})
 ```
 
 ### Sync

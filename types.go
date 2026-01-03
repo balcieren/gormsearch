@@ -93,7 +93,8 @@ type GormSearch struct {
 	config         *Config
 	registry       map[string]*IndexConfig
 	registryByType map[string]*IndexConfig
-	mu             sync.RWMutex
+	mu             *sync.RWMutex
+	ctx            context.Context
 }
 
 // Config holds the configuration options for GormSearch.
