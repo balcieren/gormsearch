@@ -60,6 +60,30 @@ func (m *MockIndex) UpdateSettings(settings *meilisearch.Settings) (*meilisearch
 	return args.Get(0).(*meilisearch.TaskInfo), args.Error(1)
 }
 
+func (m *MockIndex) AddDocumentsWithContext(ctx context.Context, documents any, opts *meilisearch.DocumentOptions) (*meilisearch.TaskInfo, error) {
+	args := m.Called(ctx, documents, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*meilisearch.TaskInfo), args.Error(1)
+}
+
+func (m *MockIndex) UpdateDocumentsWithContext(ctx context.Context, documents any, opts *meilisearch.DocumentOptions) (*meilisearch.TaskInfo, error) {
+	args := m.Called(ctx, documents, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*meilisearch.TaskInfo), args.Error(1)
+}
+
+func (m *MockIndex) DeleteDocumentWithContext(ctx context.Context, id string, options *meilisearch.DocumentOptions) (*meilisearch.TaskInfo, error) {
+	args := m.Called(ctx, id, options)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*meilisearch.TaskInfo), args.Error(1)
+}
+
 // Test Models for Generics
 type GenericTestProduct struct {
 	ID    uint    `json:"id"`

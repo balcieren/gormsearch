@@ -73,8 +73,18 @@ func (gs *GormSearch) syncDocument(db *gorm.DB, config *IndexConfig, op operatio
 		}
 		loadedModel := reflect.New(modelType).Interface()
 
-		// Use the transaction db to find the record
-		if err := db.Session(&gorm.Session{NewDB: true}).Unscoped().First(loadedModel, id).Error; err != nil {
+		// Use the same database session to maintain transaction consistency
+		// This ensures we read the data within the same transaction context
+		reloadDB := db
+		if db.Statement.ConnPool != nil {
+			// Create a new statement but keep the same connection pool (transaction)
+			reloadDB = db.Session(&gorm.Session{})
+		}
+
+		if err := reloadDB.Unscoped().First(loadedModel, id).Error; err != nil {
+			if gs.config.OnError != nil {
+				gs.config.OnError("reload", err)
+			}
 			return
 		}
 
@@ -106,8 +116,14 @@ func (gs *GormSearch) syncDocument(db *gorm.DB, config *IndexConfig, op operatio
 		job.Operation = "delete"
 	}
 
-	// Dispatch job
-	if err := gs.config.Dispatcher.Dispatch(context.Background(), job); err != nil {
+	// Use the GormSearch context if available, otherwise use background
+	ctx := gs.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Dispatch job with context support
+	if err := gs.config.Dispatcher.Dispatch(ctx, job); err != nil {
 		if gs.config.OnError != nil {
 			gs.config.OnError("dispatch", err)
 		}

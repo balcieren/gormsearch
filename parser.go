@@ -172,15 +172,6 @@ func parseFieldTags(field reflect.StructField) fieldInfo {
 	return info
 }
 
-// mergeFieldMappings merges embedded struct fields into the main config.
-func mergeFieldMappings(main, embedded *IndexConfig) {
-	for name, info := range embedded.FieldMapping {
-		if _, exists := main.FieldMapping[name]; !exists {
-			main.FieldMapping[name] = info
-		}
-	}
-}
-
 // toSnakeCase converts CamelCase to snake_case.
 // defaultNamingStrategy is efficient to reuse as it's stateless for standard usage.
 var defaultNamingStrategy = schema.NamingStrategy{}

@@ -1,6 +1,6 @@
 module github.com/balcieren/gormsearch
 
-go 1.25.5
+go 1.23
 
 require (
 	github.com/meilisearch/meilisearch-go v0.35.0

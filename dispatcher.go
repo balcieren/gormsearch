@@ -26,44 +26,67 @@ func NewDefaultDispatcher(client meilisearch.ServiceManager, maxWorkers, maxRetr
 	}
 }
 
-// Dispatch executes the job asynchronously.
+// Dispatch executes the job asynchronously with context support.
+// The context is used for cancellation - if cancelled before the job starts,
+// the job will not be executed.
 func (d *DefaultDispatcher) Dispatch(ctx context.Context, job Job) error {
-	// In-memory dispatcher ignores context cancellation for the goroutine launch itself,
-	// but could pass it down if operations supported it. Use Background for async detach.
-	go d.safeGo(job, func() error {
-		return d.retry(func() error {
-			return d.execute(job)
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	go d.safeGo(ctx, job, func() error {
+		return d.retryWithContext(ctx, func() error {
+			return d.executeWithContext(ctx, job)
 		})
 	})
 	return nil
 }
 
-// Execute applies a job to Meilisearch.
+// ExecuteWithContext applies a job to Meilisearch with context support.
 // Use this function in your external worker (Consumer) to process jobs received from the queue.
-func Execute(client meilisearch.ServiceManager, job Job) error {
+func ExecuteWithContext(ctx context.Context, client meilisearch.ServiceManager, job Job) error {
+	if client == nil {
+		return nil // No-op if client is nil
+	}
+
 	index := client.Index(job.IndexName)
 
 	switch job.Operation {
 	case "create":
-		// Wrap in []any to support both map[string]any and json.RawMessage
-		_, err := index.AddDocuments([]any{job.Document}, nil)
+		_, err := index.AddDocumentsWithContext(ctx, []any{job.Document}, nil)
 		return err
 	case "update":
-		_, err := index.UpdateDocuments([]any{job.Document}, nil)
+		_, err := index.UpdateDocumentsWithContext(ctx, []any{job.Document}, nil)
 		return err
 	case "delete":
-		_, err := index.DeleteDocument(job.ID, nil)
+		_, err := index.DeleteDocumentWithContext(ctx, job.ID, nil)
 		return err
 	}
 	return nil
 }
 
-func (d *DefaultDispatcher) execute(job Job) error {
-	return Execute(d.client, job)
+// Execute applies a job to Meilisearch (backward compatible, no context).
+// Use this function in your external worker (Consumer) to process jobs received from the queue.
+func Execute(client meilisearch.ServiceManager, job Job) error {
+	return ExecuteWithContext(context.Background(), client, job)
+}
+
+func (d *DefaultDispatcher) executeWithContext(ctx context.Context, job Job) error {
+	return ExecuteWithContext(ctx, d.client, job)
 }
 
 // safeGo executes a function with panic recovery and worker pool.
-func (d *DefaultDispatcher) safeGo(job Job, fn func() error) {
+func (d *DefaultDispatcher) safeGo(ctx context.Context, job Job, fn func() error) {
+	// Check context before acquiring worker
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
 	d.pool.acquire()
 	defer d.pool.release()
 
@@ -78,8 +101,8 @@ func (d *DefaultDispatcher) safeGo(job Job, fn func() error) {
 	}
 }
 
-// retry executes a function with exponential backoff.
-func (d *DefaultDispatcher) retry(fn func() error) error {
+// retryWithContext executes a function with exponential backoff and context support.
+func (d *DefaultDispatcher) retryWithContext(ctx context.Context, fn func() error) error {
 	maxRetries := d.maxRetries
 	if maxRetries <= 0 {
 		maxRetries = 3 // Default
@@ -87,11 +110,27 @@ func (d *DefaultDispatcher) retry(fn func() error) error {
 
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
+		// Check context before each attempt
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return lastErr
+			}
+			return ctx.Err()
+		default:
+		}
+
 		if err := fn(); err != nil {
 			lastErr = err
 			// Exponential backoff: 100ms, 200ms, 400ms...
-			time.Sleep(time.Duration(100*(1<<i)) * time.Millisecond)
-			continue
+			backoff := time.Duration(100*(1<<i)) * time.Millisecond
+
+			select {
+			case <-ctx.Done():
+				return lastErr
+			case <-time.After(backoff):
+				continue
+			}
 		}
 		return nil
 	}

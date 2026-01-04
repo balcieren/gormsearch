@@ -180,15 +180,6 @@ func hasSettings(s *meilisearch.Settings) bool {
 		s.Pagination != nil
 }
 
-// toInterfaceSlice converts a string slice to an interface slice.
-func toInterfaceSlice(s []string) []any {
-	result := make([]any, len(s))
-	for i, v := range s {
-		result[i] = v
-	}
-	return result
-}
-
 // Sync manually syncs all records of a model to Meilisearch.
 func (gs *GormSearch) Sync(model any) error {
 	ctx := gs.ctx
@@ -203,6 +194,11 @@ func (gs *GormSearch) Sync(model any) error {
 	config, err := parseModel(model)
 	if err != nil {
 		return err
+	}
+
+	// Apply index prefix if configured
+	if gs.config.IndexPrefix != "" {
+		config.IndexName = gs.config.IndexPrefix + config.IndexName
 	}
 
 	index := gs.client.Index(config.IndexName)

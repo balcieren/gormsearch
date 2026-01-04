@@ -11,10 +11,10 @@ A minimalist Go library that provides seamless integration between GORM and Meil
 - 🔄 **Auto Sync** - GORM hooks automatically sync Create/Update/Delete operations
 - 🗑️ **Soft Delete Support** - Automatically removes from Meilisearch on soft delete
 - ⚡ **Async Mode** - Non-blocking operations with worker pool
-- 🔁 **Retry Logic** - Exponential backoff for failed operations
+- 🔁 **Retry Logic** - Exponential backoff for failed operations with context-aware cancellation
 - 🔍 **Facets & Highlighting** - Built-in support for faceted search
 - 🎯 **Generics** - Type-safe search results with `Of[T]()` and `SearchAs[T]()`
-- ⏱️ **Context Support** - Timeout and cancellation via context
+- ⏱️ **Context Support** - Full context propagation for timeout and cancellation
 - 🔒 **Safe by Default** - Input validation, panic recovery, limit enforcement
 
 ## Installation
@@ -93,13 +93,13 @@ func main() {
 
 ## Struct Tag Reference
 
-| Tag | Description |
-|-----|-------------|
-| `searchable` | Field is indexed for full-text search |
+| Tag          | Description                                     |
+| ------------ | ----------------------------------------------- |
+| `searchable` | Field is indexed for full-text search           |
 | `filterable` | Field can be filtered (`filter: "price > 100"`) |
-| `sortable` | Field can be sorted (`sort: ["price:asc"]`) |
-| `primaryKey` | Field is the primary key for Meilisearch index |
-| `-` | Field is excluded from Meilisearch |
+| `sortable`   | Field can be sorted (`sort: ["price:asc"]`)     |
+| `primaryKey` | Field is the primary key for Meilisearch index  |
+| `-`          | Field is excluded from Meilisearch              |
 
 ```go
 type Article struct {
@@ -254,7 +254,9 @@ gs.Sync(&Product{})
 ```
 
 ## Performance
+
 GormSearch is built for high speed and efficient memory usage:
+
 - **Zero-Allocation**: reflection hot paths are cached.
 - **Buffer Reuse**: syncing reuses memory buffers to minimize GC pressure.
 - **O(1) Lookups**: internal registries use optimized maps for instant access.
@@ -411,6 +413,7 @@ Offload synchronization to external queues like Redis, NATS, or Kafka to ensure 
 Use `WithQueue` to integrate any queue system in a single line. GormSearch handles the serialization (JSON) automatically.
 
 #### Redis Example
+
 ```go
 // Producer
 gs, _ := gormsearch.New(db, meili,
@@ -421,6 +424,7 @@ gs, _ := gormsearch.New(db, meili,
 ```
 
 #### NATS Example
+
 ```go
 // Producer
 gs, _ := gormsearch.New(db, meili,
@@ -431,11 +435,20 @@ gs, _ := gormsearch.New(db, meili,
 ```
 
 #### Consumer (Worker)
+
 In your worker service, simply pass the received data to `Consume`:
 
 ```go
 // Can be used with any queue (Redis, NATS, Kafka, etc.)
 err := gormsearch.Consume(meiliClient, payload)
+
+// Or with context support for timeout/cancellation
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+
+var job gormsearch.Job
+json.Unmarshal(payload, &job)
+err := gormsearch.ExecuteWithContext(ctx, meiliClient, job)
 ```
 
 ### 2. Advanced Customization
@@ -443,6 +456,7 @@ err := gormsearch.Consume(meiliClient, payload)
 If you need full control over the job creation logic (e.g., adding custom metadata, changing operation types), use the options ending in `Func`.
 
 #### Custom Dispatcher
+
 Use `WithDispatcherFunc` to bypass default serialization and handle the raw job struct directly.
 
 ```go
