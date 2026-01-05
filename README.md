@@ -13,7 +13,7 @@ A minimalist Go library that provides seamless integration between GORM and Meil
 - ⚡ **Async Mode** - Non-blocking operations with worker pool
 - 🔁 **Retry Logic** - Exponential backoff for failed operations with context-aware cancellation
 - 🔍 **Facets & Highlighting** - Built-in support for faceted search
-- 🎯 **Generics** - Type-safe search results with `SearchFor[T]()`
+- 🎯 **Generics** - Type-safe search results with `SearchFor[T]()` and `Of[T]()`
 - ⏱️ **Context Support** - Full context propagation for timeout and cancellation
 - 🔒 **Safe by Default** - Input validation, panic recovery, limit enforcement
 
