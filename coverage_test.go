@@ -583,7 +583,7 @@ func TestSearchAs(t *testing.T) {
 		Hits: []meilisearch.Hit{},
 	}, nil)
 
-	_, err := SearchAs[CoverageTestModel](gs, "coverage_test", "test")
+	_, err := SearchFor[CoverageTestModel](gs, "test", WithIndexName("coverage_test"))
 	assert.NoError(t, err)
 }
 
@@ -608,7 +608,7 @@ func TestMultiSearchAs(t *testing.T) {
 		},
 	}, nil)
 
-	_, err := MultiSearchAs[CoverageTestModel](gs, SearchQuery{
+	_, err := MultiSearchFor[CoverageTestModel](gs, SearchQuery{
 		IndexName: "coverage_test",
 		Query:     "test",
 	})
@@ -860,7 +860,7 @@ func TestSearchAs_WithCustomIndex(t *testing.T) {
 		EstimatedTotalHits: 1,
 	}, nil)
 
-	result, err := SearchAs[CoverageTestModel](gs, "custom_idx", "custom query")
+	result, err := SearchFor[CoverageTestModel](gs, "custom query", WithIndexName("custom_idx"))
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 }
@@ -1732,7 +1732,7 @@ func TestSearchAs_Error(t *testing.T) {
 	mockClient.On("Index", "test_idx").Return(mockIndex)
 	mockIndex.On("SearchWithContext", mock.Anything, "error query", mock.Anything).Return(nil, errors.New("search error"))
 
-	_, err := SearchAs[CoverageTestModel](gs, "test_idx", "error query")
+	_, err := SearchFor[CoverageTestModel](gs, "error query", WithIndexName("test_idx"))
 	assert.Error(t, err)
 }
 
@@ -1750,7 +1750,7 @@ func TestMultiSearchAs_Error(t *testing.T) {
 
 	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(nil, errors.New("multi search error"))
 
-	_, err := MultiSearchAs[CoverageTestModel](gs, SearchQuery{IndexName: "test_idx", Query: "test"})
+	_, err := MultiSearchFor[CoverageTestModel](gs, SearchQuery{IndexName: "test_idx", Query: "test"})
 	assert.Error(t, err)
 }
 
@@ -2377,7 +2377,7 @@ func TestSearchFor_WithGormSearch(t *testing.T) {
 		EstimatedTotalHits: 1,
 	}, nil)
 
-	resp, err := SearchAs[CoverageTestModel](gs, "search_test_idx", "query")
+	resp, err := SearchFor[CoverageTestModel](gs, "query", WithIndexName("search_test_idx"))
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.Equal(t, int64(1), resp.EstimatedTotal)
