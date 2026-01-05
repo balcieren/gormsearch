@@ -13,7 +13,7 @@ A minimalist Go library that provides seamless integration between GORM and Meil
 - ⚡ **Async Mode** - Non-blocking operations with worker pool
 - 🔁 **Retry Logic** - Exponential backoff for failed operations with context-aware cancellation
 - 🔍 **Facets & Highlighting** - Built-in support for faceted search
-- 🎯 **Generics** - Type-safe search results with `Of[T]()` and `SearchAs[T]()`
+- 🎯 **Generics** - Type-safe search results with `SearchFor[T]()`
 - ⏱️ **Context Support** - Full context propagation for timeout and cancellation
 - 🔒 **Safe by Default** - Input validation, panic recovery, limit enforcement
 
@@ -122,10 +122,12 @@ Get typed results directly using Go generics.
 // Auto-detect index name from type
 results, _ := gormsearch.SearchFor[Product](gs, "macbook")
 
-// Or with fluent API
-products := gormsearch.Of[Product](gs)
-results, _ := products.Search("macbook")
-results, _ := products.WithContext(ctx).Search("macbook")
+// With options
+results, _ := gormsearch.SearchFor[Product](gs, "macbook",
+    gormsearch.WithIndexName("custom_products_index"), // Optional: Custom index name
+    gormsearch.WithLimit(10),
+    gormsearch.WithFilter("price < 1000"),
+)
 
 // Access typed results
 for _, p := range results.Hits {
@@ -143,28 +145,16 @@ var categories []Category
 var users []User
 
 // Single HTTP request, multiple types
-results, err := gs.MultiSearch(
+results, err := gormsearch.MultiSearchFor[Product](gs,
     gormsearch.Query(&products, "macbook"),
     gormsearch.Query(&categories, "electronics"),
-    gormsearch.Query(&users, "john", gormsearch.WithLimit(5)),
+    // You can override index name per query if needed
+    gormsearch.Query(&users, "john", gormsearch.WithIndexName("custom_users")),
 )
 
 if err == nil {
-    fmt.Printf("Total products: %d\n", results[0].EstimatedTotal)
-    // Access full result including raw hits if needed
-    // fmt.Println(results[0].Hits[0]["name"])
+    fmt.Printf("Total products: %d\n", results.Results[0].EstimatedTotal)
 }
-
-// With context
-results, err := gs.WithContext(ctx).MultiSearch(
-    gormsearch.Query(&products, "macbook"),
-    gormsearch.Query(&categories, "electronics"),
-)
-
-// With explicit index name
-results, err := gs.MultiSearch(
-    gormsearch.QueryIndex(&products, "custom_index", "macbook"),
-)
 ```
 
 ## Raw Search
