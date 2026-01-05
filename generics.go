@@ -61,54 +61,49 @@ func (s *Searcher[T]) WithContext(ctx context.Context) *Searcher[T] {
 
 // Search performs a typed search with auto-detected index name.
 func (s *Searcher[T]) Search(query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](s.gs, s.indexName, query, opts...)
+	return SearchFor[T](s.gs, query, opts...)
 }
 
 // SearchIndex performs a typed search on a specific index.
 func (s *Searcher[T]) SearchIndex(indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](s.gs, indexName, query, opts...)
+	opts = append(opts, WithIndexName(indexName))
+	return SearchFor[T](s.gs, query, opts...)
 }
 
 // MultiSearch performs a typed multi-search.
 func (s *Searcher[T]) MultiSearch(queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	return multiSearchAs[T](s.gs, queries...)
+	return MultiSearchFor[T](s.gs, queries...)
 }
 
 // ============================================================================
 // Direct Functions
 // ============================================================================
 
-// SearchFor performs a typed search with auto-detected index name.
+// SearchFor performs a typed search.
+// If index name is not provided via WithIndexName option, it is auto-detected from T.
 //
 //	results, _ := gormsearch.SearchFor[Product](gs, "macbook")
-//
-// SearchFor performs a typed search with auto-detected index name.
-//
-//	results, _ := gormsearch.SearchFor[Product](gs, "macbook")
+//	results, _ := gormsearch.SearchFor[Product](gs, "macbook", gormsearch.WithIndexName("custom_index"))
 func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](gs, indexNameFor[T](), query, opts...)
-}
+	// 1. Determine index name
+	// Check if explicit index name is provided in options
+	var tempOpts SearchOptions
+	for _, opt := range opts {
+		opt(&tempOpts)
+	}
 
-// SearchAs performs a typed search with explicit index name.
-func SearchAs[T any](gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	return searchAs[T](gs, indexName, query, opts...)
-}
+	indexName := tempOpts.IndexName
+	if indexName == "" {
+		indexName = indexNameFor[T]()
+	}
 
-// MultiSearchAs performs a typed multi-search.
-func MultiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	return multiSearchAs[T](gs, queries...)
-}
-
-// ============================================================================
-// Internal
-// ============================================================================
-
-func searchAs[T any](gs *GormSearch, indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
+	// 2. Perform search
 	result, err := gs.Search(indexName, query, opts...)
 	if err != nil {
 		return nil, err
 	}
 
+	// 3. Decode results
 	var hits []T
 	if gs.config != nil && gs.config.MapDecoder != nil {
 		if err := gs.config.MapDecoder(result.Hits, &hits); err != nil {
@@ -132,7 +127,29 @@ func searchAs[T any](gs *GormSearch, indexName, query string, opts ...SearchOpti
 	}, nil
 }
 
-func multiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
+// MultiSearchFor performs a typed multi-search.
+func MultiSearchFor[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
+	// For multi-search, index names are in the queries themselves.
+	// But wait, `SearchQuery` struct has `IndexName`.
+	// The generic wrapper usually implies the result type T.
+	// If `queries` have explicit IndexName, we use them.
+	// If `queries` have empty IndexName, should we fill it?
+	// The current logic of `searchAs` (renamed to internal logic) was:
+	// func multiSearchAs[T any](gs *GormSearch, queries ...SearchQuery)
+	// It passed queries directly to `MultiSearchRaw`.
+	// `MultiSearchRaw` executes them.
+	// If the user uses `MultiSearchFor[T]`, they construct `SearchQuery`.
+	// `SearchQuery` has `IndexName`.
+	// Let's iterate and fill missing index names?
+
+	// We'll rename `multiSearchAs` logic to here and improve it.
+
+	for i := range queries {
+		if queries[i].IndexName == "" {
+			queries[i].IndexName = indexNameFor[T]()
+		}
+	}
+
 	result, err := gs.MultiSearchRaw(queries...)
 	if err != nil {
 		return nil, err
@@ -169,6 +186,10 @@ func multiSearchAs[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSe
 		ProcessingTimeMs: result.ProcessingTimeMs,
 	}, nil
 }
+
+// ============================================================================
+// Internal
+// ============================================================================
 
 func indexNameFor[T any]() string {
 	var zero T

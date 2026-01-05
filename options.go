@@ -168,3 +168,11 @@ func WithQueue(publish func(ctx context.Context, data []byte) error) Option {
 		}
 	}
 }
+
+// WithIndexName sets the index name for the search query.
+// This overrides the auto-detected index name in generic search functions.
+func WithIndexName(name string) SearchOption {
+	return func(o *SearchOptions) {
+		o.IndexName = name
+	}
+}

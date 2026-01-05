@@ -172,6 +172,7 @@ type SearchOptions struct {
 	Sort      []string
 	Facets    []string
 	Highlight []string
+	IndexName string
 }
 
 // SearchQuery represents a single query for MultiSearch.
