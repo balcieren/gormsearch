@@ -135,6 +135,27 @@ for _, p := range results.Hits {
 }
 ```
 
+
+### Fluent API
+
+You can also use the `Of[T]` helper for a more fluent style:
+
+```go
+// Create a typed searcher
+products := gormsearch.Of[Product](gs)
+
+// Search
+results, _ := products.Search("macbook")
+
+// With context and options
+results, _ := products.WithContext(ctx).Search("macbook",
+    gormsearch.WithLimit(10),
+)
+
+// Search in a specific index
+results, _ := products.SearchIndex("custom_index", "macbook")
+```
+
 ### Multi-Type MultiSearch
 
 Perform searches across multiple indexes with different types in a single HTTP request.
