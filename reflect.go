@@ -61,6 +61,8 @@ func (gs *GormSearch) toDocument(model any, config *IndexConfig) map[string]any 
 	return doc
 }
 
+// toFloat converts a reflect.Value to float64.
+// Supports int, uint, and float types.
 func toFloat(v reflect.Value) (float64, error) {
 	switch v.Kind() {
 	case reflect.Float32, reflect.Float64:
@@ -98,6 +100,8 @@ func extractID(model any, config *IndexConfig) string {
 	return valToString(idField)
 }
 
+// valToString converts a reflect.Value to its string representation.
+// Uses fast paths for common numeric and string types.
 func valToString(v reflect.Value) string {
 	// Fast path for common types
 	switch id := v.Interface().(type) {
@@ -255,6 +259,8 @@ func (gs *GormSearch) decodeDocument(doc map[string]any, dest any) error {
 	return nil
 }
 
+// setFieldValue sets a struct field value from an interface{} value.
+// Handles type conversion for common types including strings, numbers, bools, and time.Time.
 func setFieldValue(field reflect.Value, val any) {
 	if val == nil {
 		return
@@ -293,6 +299,7 @@ func setFieldValue(field reflect.Value, val any) {
 	}
 }
 
+// setFloat sets a float value on a reflect.Value if it's a float type.
 func setFloat(field reflect.Value, val float64) {
 	if !field.CanSet() {
 		return

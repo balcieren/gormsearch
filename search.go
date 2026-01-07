@@ -153,7 +153,6 @@ func clampLimit(limit int64) int64 {
 }
 
 // convertHits converts Meilisearch hits to a slice of maps.
-// convertHits converts Meilisearch hits to a slice of maps.
 func convertHits(hits meilisearch.Hits) []map[string]any {
 	// Optimization: Avoid json.Unmarshal overhead.
 	// We still need to copy the map because map[string]interface{} != map[string]any in Go's type system.

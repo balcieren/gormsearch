@@ -191,6 +191,8 @@ func MultiSearchFor[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiS
 // Internal
 // ============================================================================
 
+// indexNameFor returns the index name for a generic type T.
+// It uses caching to avoid repeated reflection lookups.
 func indexNameFor[T any]() string {
 	var zero T
 	t := reflect.TypeOf(zero)
