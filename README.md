@@ -79,11 +79,14 @@ func main() {
     })
 
     // Search with Typed API
-    results, _ := gormsearch.SearchFor[Product](gs, "macbook",
+    results, err := gormsearch.SearchFor[Product](gs, "macbook",
         gormsearch.WithLimit(10),
         gormsearch.WithFilter("category = 'electronics'"),
         gormsearch.WithSort("price:asc"),
     )
+    if err != nil {
+        log.Fatal(err)
+    }
 
     for _, product := range results.Hits {
         fmt.Printf("Found: %s ($%.2f)\n", product.Name, product.Price)
@@ -112,6 +115,19 @@ type Article struct {
 }
 ```
 
+## Model Interface
+
+Models can optionally implement the `Indexable` interface to customize the Meilisearch index name:
+
+```go
+// Indexable is an optional interface for custom index names.
+type Indexable interface {
+    IndexName() string
+}
+```
+
+If not implemented, the table name (from GORM's `Tabler` interface or struct name) is used as the index name.
+
 ## Typed Search
 
 Get typed results directly using Go generics.
@@ -120,10 +136,13 @@ Get typed results directly using Go generics.
 
 ```go
 // Auto-detect index name from type
-results, _ := gormsearch.SearchFor[Product](gs, "macbook")
+results, err := gormsearch.SearchFor[Product](gs, "macbook")
+if err != nil {
+    log.Fatal(err)
+}
 
 // With options
-results, _ := gormsearch.SearchFor[Product](gs, "macbook",
+results, err = gormsearch.SearchFor[Product](gs, "macbook",
     gormsearch.WithIndexName("custom_products_index"), // Optional: Custom index name
     gormsearch.WithLimit(10),
     gormsearch.WithFilter("price < 1000"),
@@ -145,15 +164,45 @@ You can also use the `Of[T]` helper for a more fluent style:
 products := gormsearch.Of[Product](gs)
 
 // Search
-results, _ := products.Search("macbook")
+results, err := products.Search("macbook")
+if err != nil {
+    log.Fatal(err)
+}
 
-// With context and options
-results, _ := products.WithContext(ctx).Search("macbook",
+// With context
+results, err = products.WithContext(ctx).Search("macbook",
     gormsearch.WithLimit(10),
 )
 
-// Search in a specific index
-results, _ := products.SearchIndex("custom_index", "macbook")
+// Override index name
+results, err = products.Index("archived_products").Search("macbook")
+
+// Chain everything
+results, err = gormsearch.Of[Product](gs).
+    WithContext(ctx).
+    Index("v2_products").
+    Search("macbook", gormsearch.WithLimit(10))
+```
+
+### Raw Index Search
+
+Use `gs.Index()` for raw search when you don't need typed results:
+
+```go
+// Raw search (returns map[string]any)
+results, err := gs.Index("products").Search("macbook")
+for _, hit := range results.Hits {
+    name := hit["name"].(string) // manual type assertion
+}
+
+// With context
+results, err = gs.Index("products").WithContext(ctx).Search("macbook")
+
+// With options
+results, err = gs.Index("products").Search("macbook",
+    gormsearch.WithLimit(10),
+    gormsearch.WithFilter("price < 1000"),
+)
 ```
 
 ### Multi-Type MultiSearch
@@ -163,18 +212,26 @@ Perform searches across multiple indexes with different types in a single HTTP r
 ```go
 var products []Product
 var categories []Category
-var users []User
 
-// Single HTTP request, multiple types
-results, err := gormsearch.MultiSearchFor[Product](gs,
-    gormsearch.Query(&products, "macbook"),
-    gormsearch.Query(&categories, "electronics"),
-    // You can override index name per query if needed
-    gormsearch.Query(&users, "john", gormsearch.WithIndexName("custom_users")),
+// Single HTTP request, multiple types - results decode into destination slices
+metadata, err := gs.MultiSearch(
+    gormsearch.Query(&products, "macbook").As("products"),
+    gormsearch.Query(&categories, "electronics").As("categories"),
 )
 
 if err == nil {
-    fmt.Printf("Total products: %d\n", results.Results[0].EstimatedTotal)
+    // Access decoded results directly
+    for _, p := range products {
+        fmt.Printf("Product: %s\n", p.Name)
+    }
+
+    // metadata contains EstimatedTotal, ProcessingTime, etc. for each query
+    // Use ByKey map for named access
+    fmt.Printf("Total products: %d\n", metadata.ByKey["products"].EstimatedTotal)
+    fmt.Printf("Total categories: %d\n", metadata.ByKey["categories"].EstimatedTotal)
+
+    // Or access via index (order preserved)
+    // fmt.Printf("Total products: %d\n", metadata.Results[0].EstimatedTotal)
 }
 ```
 
@@ -280,6 +337,12 @@ GormSearch is built for high speed and efficient memory usage:
 Implement `SettingProvider` interface to configure advanced settings like synonyms, stop words, and ranking rules.
 
 ```go
+// SettingProvider interface definition
+type SettingProvider interface {
+    MeiliSettings() *meilisearch.Settings
+}
+
+// Example implementation
 func (p Product) MeiliSettings() *meilisearch.Settings {
     return &meilisearch.Settings{
         Synonyms: map[string][]string{
@@ -360,6 +423,19 @@ The `Sync` method is optimized for bulk operations. It uses `FindInBatches` inte
 ```go
 // Efficiently re-index millions of records
 err := gs.Sync(&Product{})
+```
+
+### 6. Retry Logic
+
+Configure automatic retries with exponential backoff for failed Meilisearch operations:
+
+```go
+gs, _ := gormsearch.New(db, meili,
+    gormsearch.WithMaxRetries(3), // Retry up to 3 times on failure
+    gormsearch.WithOnError(func(op string, err error) {
+        log.Printf("operation %s failed: %v", op, err)
+    }),
+)
 ```
 
 ## Custom Serialization
