@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -544,7 +545,7 @@ func TestDecodeDocument_UnregisteredType(t *testing.T) {
 // Generics Searcher Tests
 // ============================================================================
 
-func TestSearcherSearchIndex(t *testing.T) {
+func TestSearcherIndex_Coverage(t *testing.T) {
 	mockClient := new(MockClient)
 	mockIndex := new(MockIndex)
 
@@ -561,8 +562,9 @@ func TestSearcherSearchIndex(t *testing.T) {
 		Hits: []meilisearch.Hit{},
 	}, nil)
 
+	// Use new Index().Search() API
 	searcher := Of[CoverageTestModel](gs)
-	_, err := searcher.SearchIndex("custom_index", "test")
+	_, err := searcher.Index("custom_index").Search("test")
 	assert.NoError(t, err)
 }
 
@@ -591,7 +593,7 @@ func TestSearchAs(t *testing.T) {
 // MultiSearch Tests
 // ============================================================================
 
-func TestMultiSearchAs(t *testing.T) {
+func TestMultiSearch(t *testing.T) {
 	mockClient := new(MockClient)
 
 	gs := &GormSearch{
@@ -604,40 +606,19 @@ func TestMultiSearchAs(t *testing.T) {
 
 	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
 		Results: []meilisearch.SearchResponse{
-			{Hits: []meilisearch.Hit{}},
+			{Hits: []meilisearch.Hit{
+				{"id": json.RawMessage(`1`), "name": json.RawMessage(`"Test"`)},
+			}},
 		},
 	}, nil)
 
-	_, err := MultiSearchFor[CoverageTestModel](gs, SearchQuery{
-		IndexName: "coverage_test",
-		Query:     "test",
-	})
+	var results []CoverageTestModel
+	metadata, err := gs.MultiSearch(
+		Query(&results, "test"),
+	)
 	assert.NoError(t, err)
-}
-
-func TestSearcherMultiSearch(t *testing.T) {
-	mockClient := new(MockClient)
-
-	gs := &GormSearch{
-		client:   mockClient,
-		registry: make(map[string]*IndexConfig),
-		mu:       &sync.RWMutex{},
-		ctx:      context.Background(),
-	}
-	gs.registry["coverage_test"] = &IndexConfig{IndexName: "coverage_test"}
-
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
-		Results: []meilisearch.SearchResponse{
-			{Hits: []meilisearch.Hit{}},
-		},
-	}, nil)
-
-	searcher := Of[CoverageTestModel](gs)
-	_, err := searcher.MultiSearch(SearchQuery{
-		IndexName: "coverage_test",
-		Query:     "test",
-	})
-	assert.NoError(t, err)
+	assert.Len(t, metadata.Results, 1)
+	assert.Len(t, results, 1)
 }
 
 // ============================================================================
@@ -1695,7 +1676,35 @@ func TestMultiSearch_WithCustomDecoder(t *testing.T) {
 	tq := Query[CoverageTestModel](&results, "test")
 	searchResults, err := gs.MultiSearch(tq)
 	assert.NoError(t, err)
-	assert.Len(t, searchResults, 1)
+	assert.Len(t, searchResults.Results, 1)
+}
+
+func TestMultiSearch_Key(t *testing.T) {
+	mockClient := new(MockClient)
+	gs := &GormSearch{
+		client:   mockClient,
+		registry: make(map[string]*IndexConfig),
+		mu:       &sync.RWMutex{},
+		ctx:      context.Background(),
+	}
+	gs.registry["coverage_test"] = &IndexConfig{IndexName: "coverage_test"}
+
+	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
+		Results: []meilisearch.SearchResponse{
+			{Hits: []meilisearch.Hit{{"id": json.RawMessage(`1`)}}, EstimatedTotalHits: 1},
+		},
+	}, nil)
+
+	var results []CoverageTestModel
+	tq := Query[CoverageTestModel](&results, "test").As("my_key")
+
+	searchResults, err := gs.MultiSearch(tq)
+	assert.NoError(t, err)
+	assert.Len(t, searchResults.Results, 1)
+
+	assert.NotNil(t, searchResults.ByKey)
+	assert.Contains(t, searchResults.ByKey, "my_key")
+	assert.Equal(t, int64(1), searchResults.ByKey["my_key"].EstimatedTotal)
 }
 
 func TestQueryIndex_ClosureExecution(t *testing.T) {
@@ -1736,7 +1745,7 @@ func TestSearchAs_Error(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestMultiSearchAs_Error(t *testing.T) {
+func TestMultiSearch_Error(t *testing.T) {
 	mockClient := new(MockClient)
 
 	gs := &GormSearch{
@@ -1750,7 +1759,8 @@ func TestMultiSearchAs_Error(t *testing.T) {
 
 	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(nil, errors.New("multi search error"))
 
-	_, err := MultiSearchFor[CoverageTestModel](gs, SearchQuery{IndexName: "test_idx", Query: "test"})
+	var results []CoverageTestModel
+	_, err := gs.MultiSearch(QueryIndex(&results, "test_idx", "test"))
 	assert.Error(t, err)
 }
 
@@ -1845,9 +1855,9 @@ func TestDefaultDispatcher_AllRetriesFail(t *testing.T) {
 	mockClient := new(MockClient)
 	mockIndex := new(MockIndex)
 
-	errorCount := 0
+	var errorCount int32
 	onError := func(op string, err error) {
-		errorCount++
+		atomic.AddInt32(&errorCount, 1)
 	}
 
 	mockClient.On("Index", "fail_test").Return(mockIndex)
@@ -1867,7 +1877,7 @@ func TestDefaultDispatcher_AllRetriesFail(t *testing.T) {
 
 	// Wait for async retry attempts
 	time.Sleep(500 * time.Millisecond)
-	assert.Greater(t, errorCount, 0) // Error callback should have been called
+	assert.Greater(t, atomic.LoadInt32(&errorCount), int32(0)) // Error callback should have been called
 }
 
 func TestDefaultDispatcher_ZeroRetries(t *testing.T) {
@@ -1965,7 +1975,7 @@ func TestQueryIndex_WithDecodeDefault(t *testing.T) {
 	tq := QueryIndex[CoverageTestModel](&results, "query_idx_test", "item")
 	searchResults, err := gs.MultiSearch(tq)
 	assert.NoError(t, err)
-	assert.Len(t, searchResults, 1)
+	assert.Len(t, searchResults.Results, 1)
 }
 
 // ============================================================================
@@ -1976,10 +1986,10 @@ func TestSafeGo_PanicRecovery(t *testing.T) {
 	mockClient := new(MockClient)
 	mockIndex := new(MockIndex)
 
-	errorCaught := false
+	var errorCaught int32
 	onError := func(op string, err error) {
 		if err != nil {
-			errorCaught = true
+			atomic.StoreInt32(&errorCaught, 1)
 		}
 	}
 
@@ -2003,7 +2013,7 @@ func TestSafeGo_PanicRecovery(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	// Panic should have been recovered and error callback called
-	assert.True(t, errorCaught)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&errorCaught))
 }
 
 // ============================================================================
@@ -2179,7 +2189,7 @@ func TestMultiSearch_WithMapDecoder(t *testing.T) {
 
 	searchResults, err := gs.MultiSearch(tq)
 	assert.NoError(t, err)
-	assert.Len(t, searchResults, 1)
+	assert.Len(t, searchResults.Results, 1)
 	assert.True(t, customDecoderCalled)
 }
 
@@ -2287,16 +2297,19 @@ func TestRetryWithContext_MaxRetriesExhausted_Direct(t *testing.T) {
 	mockClient := new(MockClient)
 	mockIndex := new(MockIndex)
 
-	callCount := 0
+	var callCount int32
 	mockClient.On("Index", "retry_exhaust_test").Return(mockIndex)
 	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
-			callCount++
+			atomic.AddInt32(&callCount, 1)
 		}).Return(nil, errors.New("persistent error"))
 
 	var lastErr error
+	var mu sync.Mutex
 	onError := func(op string, err error) {
+		mu.Lock()
 		lastErr = err
+		mu.Unlock()
 	}
 
 	dispatcher := NewDefaultDispatcher(mockClient, 10, 2, onError)
@@ -2311,7 +2324,9 @@ func TestRetryWithContext_MaxRetriesExhausted_Direct(t *testing.T) {
 
 	// Wait for retry attempts to complete
 	time.Sleep(500 * time.Millisecond)
+	mu.Lock()
 	assert.NotNil(t, lastErr)
+	mu.Unlock()
 }
 
 func TestRetryWithContext_SuccessAfterRetry(t *testing.T) {

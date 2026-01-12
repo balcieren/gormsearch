@@ -191,8 +191,8 @@ func TestFluentMultiSearch(t *testing.T) {
 
 	// Verify
 	assert.NoError(t, err)
-	assert.Len(t, results, 2)
-	assert.Len(t, results[0].Hits, 1) // Verify raw hits are present
+	assert.Len(t, results.Results, 2)
+	assert.Len(t, results.Results[0].Hits, 1) // Verify raw hits are present
 
 	// Check products
 	assert.Len(t, products, 1)
@@ -235,4 +235,110 @@ func TestOfSearcher(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Len(t, results.Hits, 1)
+}
+
+func TestSearcherIndex(t *testing.T) {
+	mockClient := new(MockClient)
+	mockIndex := new(MockIndex)
+
+	gs := &GormSearch{
+		client:   mockClient,
+		registry: make(map[string]*IndexConfig),
+		mu:       &sync.RWMutex{},
+		ctx:      context.Background(),
+	}
+	gs.registry["products"] = &IndexConfig{IndexName: "products"}
+	gs.registry["archived_products"] = &IndexConfig{IndexName: "archived_products"}
+
+	mockClient.On("Index", "archived_products").Return(mockIndex)
+
+	hits := []meilisearch.Hit{
+		{
+			"id":   json.RawMessage(`2`),
+			"name": json.RawMessage(`"Old Product"`),
+		},
+	}
+
+	mockIndex.On("SearchWithContext", mock.Anything, "old", mock.Anything).Return(&meilisearch.SearchResponse{
+		Hits: hits,
+	}, nil)
+
+	// Test Of[T].Index() chain
+	results, err := Of[GenericTestProduct](gs).Index("archived_products").Search("old")
+
+	assert.NoError(t, err)
+	assert.Len(t, results.Hits, 1)
+	assert.Equal(t, "Old Product", results.Hits[0].Name)
+}
+
+func TestIndexRef(t *testing.T) {
+	mockClient := new(MockClient)
+	mockIndex := new(MockIndex)
+
+	gs := &GormSearch{
+		client:   mockClient,
+		registry: make(map[string]*IndexConfig),
+		mu:       &sync.RWMutex{},
+		ctx:      context.Background(),
+	}
+	gs.registry["products"] = &IndexConfig{IndexName: "products"}
+
+	mockClient.On("Index", "products").Return(mockIndex)
+
+	hits := []meilisearch.Hit{
+		{
+			"id":    json.RawMessage(`1`),
+			"name":  json.RawMessage(`"MacBook"`),
+			"price": json.RawMessage(`2000.0`),
+		},
+	}
+
+	mockIndex.On("SearchWithContext", mock.Anything, "macbook", mock.Anything).Return(&meilisearch.SearchResponse{
+		Hits: hits,
+	}, nil)
+
+	// Test gs.Index().Search()
+	results, err := gs.Index("products").Search("macbook")
+
+	assert.NoError(t, err)
+	assert.Len(t, results.Hits, 1)
+	assert.NotNil(t, results.Hits[0]["name"])
+}
+
+func TestIndexRefWithContext(t *testing.T) {
+	mockClient := new(MockClient)
+	mockIndex := new(MockIndex)
+
+	gs := &GormSearch{
+		client:   mockClient,
+		registry: make(map[string]*IndexConfig),
+		mu:       &sync.RWMutex{},
+		ctx:      context.Background(),
+	}
+	gs.registry["products"] = &IndexConfig{IndexName: "products"}
+
+	mockClient.On("Index", "products").Return(mockIndex)
+
+	hits := []meilisearch.Hit{
+		{
+			"id":   json.RawMessage(`1`),
+			"name": json.RawMessage(`"Test"`),
+		},
+	}
+
+	mockIndex.On("SearchWithContext", mock.Anything, "test", mock.Anything).Return(&meilisearch.SearchResponse{
+		Hits: hits,
+	}, nil)
+
+	ctx := context.Background()
+
+	// Test gs.Index().WithContext().Search()
+	results, err := gs.Index("products").WithContext(ctx).Search("test")
+
+	assert.NoError(t, err)
+	assert.Len(t, results.Hits, 1)
+
+	// Verify Name() method
+	indexRef := gs.Index("products")
+	assert.Equal(t, "products", indexRef.Name())
 }
