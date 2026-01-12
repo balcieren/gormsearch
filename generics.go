@@ -20,6 +20,10 @@ type TypedSearchResult[T any] struct {
 	Offset            int64
 	EstimatedTotal    int64
 	FacetDistribution map[string]map[string]int64
+	HitsPerPage       int64
+	Page              int64
+	TotalPages        int64
+	TotalHits         int64
 }
 
 // ============================================================================
@@ -114,6 +118,7 @@ func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*Type
 		}
 	}
 
+	// 4. Return typed results with metadata
 	return &TypedSearchResult[T]{
 		Hits:              hits,
 		Query:             result.Query,
@@ -122,6 +127,10 @@ func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*Type
 		Offset:            result.Offset,
 		EstimatedTotal:    result.EstimatedTotal,
 		FacetDistribution: result.FacetDistribution,
+		HitsPerPage:       result.HitsPerPage,
+		Page:              result.Page,
+		TotalPages:        result.TotalPages,
+		TotalHits:         result.TotalHits,
 	}, nil
 }
 
