@@ -34,12 +34,27 @@ func (gs *GormSearch) Search(indexName, query string, opts ...SearchOption) (*Se
 	options.Limit = clampLimit(options.Limit)
 
 	req := &meilisearch.SearchRequest{
-		Limit:  options.Limit,
-		Offset: options.Offset,
+		Limit:                   options.Limit,
+		Offset:                  options.Offset,
+		AttributesToRetrieve:    options.AttributesToRetrieve,
+		AttributesToSearchOn:    options.AttributesToSearchOn,
+		AttributesToCrop:        options.AttributesToCrop,
+		CropLength:              options.CropLength,
+		CropMarker:              options.CropMarker,
+		AttributesToHighlight:   options.Highlight,
+		HighlightPreTag:         options.HighlightPreTag,
+		HighlightPostTag:        options.HighlightPostTag,
+		ShowMatchesPosition:     options.ShowMatchesPosition,
+		ShowRankingScore:        options.ShowRankingScore,
+		ShowRankingScoreDetails: options.ShowRankingScoreDetails,
+		HitsPerPage:             options.HitsPerPage,
+		Page:                    options.Page,
+		Distinct:                options.Distinct,
+		Filter:                  options.Filter,
 	}
 
-	if options.Filter != "" {
-		req.Filter = options.Filter
+	if options.MatchingStrategy != "" {
+		req.MatchingStrategy = meilisearch.MatchingStrategy(options.MatchingStrategy)
 	}
 
 	if len(options.Sort) > 0 {
@@ -48,10 +63,6 @@ func (gs *GormSearch) Search(indexName, query string, opts ...SearchOption) (*Se
 
 	if len(options.Facets) > 0 {
 		req.Facets = options.Facets
-	}
-
-	if len(options.Highlight) > 0 {
-		req.AttributesToHighlight = options.Highlight
 	}
 
 	resp, err := gs.client.Index(indexName).SearchWithContext(ctx, query, req)
@@ -67,6 +78,10 @@ func (gs *GormSearch) Search(indexName, query string, opts ...SearchOption) (*Se
 		Offset:            resp.Offset,
 		EstimatedTotal:    resp.EstimatedTotalHits,
 		FacetDistribution: parseFacets(resp.FacetDistribution),
+		HitsPerPage:       resp.HitsPerPage,
+		Page:              resp.Page,
+		TotalPages:        resp.TotalPages,
+		TotalHits:         resp.TotalHits,
 	}, nil
 }
 
@@ -99,14 +114,29 @@ func (gs *GormSearch) MultiSearchRaw(queries ...SearchQuery) (*MultiSearchResult
 		limit = clampLimit(limit)
 
 		req := &meilisearch.SearchRequest{
-			IndexUID: q.IndexName,
-			Query:    q.Query,
-			Limit:    limit,
-			Offset:   q.Offset,
+			IndexUID:                q.IndexName,
+			Query:                   q.Query,
+			Limit:                   limit,
+			Offset:                  q.Offset,
+			Filter:                  q.Filter,
+			AttributesToRetrieve:    q.AttributesToRetrieve,
+			AttributesToSearchOn:    q.AttributesToSearchOn,
+			AttributesToCrop:        q.AttributesToCrop,
+			CropLength:              q.CropLength,
+			CropMarker:              q.CropMarker,
+			AttributesToHighlight:   q.AttributesToHighlight,
+			HighlightPreTag:         q.HighlightPreTag,
+			HighlightPostTag:        q.HighlightPostTag,
+			ShowMatchesPosition:     q.ShowMatchesPosition,
+			ShowRankingScore:        q.ShowRankingScore,
+			ShowRankingScoreDetails: q.ShowRankingScoreDetails,
+			HitsPerPage:             q.HitsPerPage,
+			Page:                    q.Page,
+			Distinct:                q.Distinct,
 		}
 
-		if q.Filter != "" {
-			req.Filter = q.Filter
+		if q.MatchingStrategy != "" {
+			req.MatchingStrategy = meilisearch.MatchingStrategy(q.MatchingStrategy)
 		}
 
 		if len(q.Sort) > 0 {
@@ -124,19 +154,34 @@ func (gs *GormSearch) MultiSearchRaw(queries ...SearchQuery) (*MultiSearchResult
 	}
 
 	results := make([]SearchResult, 0, len(resp.Results))
-	for _, r := range resp.Results {
-		results = append(results, SearchResult{
-			Hits:             convertHits(r.Hits),
-			Query:            r.Query,
-			ProcessingTimeMs: r.ProcessingTimeMs,
-			Limit:            r.Limit,
-			Offset:           r.Offset,
-			EstimatedTotal:   r.EstimatedTotalHits,
-		})
+	byKey := make(map[string]SearchResult)
+
+	for i, r := range resp.Results {
+		sr := SearchResult{
+			Hits:              convertHits(r.Hits),
+			Query:             r.Query,
+			ProcessingTimeMs:  r.ProcessingTimeMs,
+			Limit:             r.Limit,
+			Offset:            r.Offset,
+			EstimatedTotal:    r.EstimatedTotalHits,
+			FacetDistribution: parseFacets(r.FacetDistribution),
+			HitsPerPage:       r.HitsPerPage,
+			Page:              r.Page,
+			TotalPages:        r.TotalPages,
+			TotalHits:         r.TotalHits,
+		}
+		results = append(results, sr)
+
+		if i < len(queries) {
+			if key := queries[i].Key; key != "" {
+				byKey[key] = sr
+			}
+		}
 	}
 
 	return &MultiSearchResult{
 		Results:          results,
+		ByKey:            byKey,
 		ProcessingTimeMs: resp.ProcessingTimeMs,
 	}, nil
 }

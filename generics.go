@@ -22,12 +22,6 @@ type TypedSearchResult[T any] struct {
 	FacetDistribution map[string]map[string]int64
 }
 
-// TypedMultiSearchResult wraps multi-search results with typed hits.
-type TypedMultiSearchResult[T any] struct {
-	Results          []TypedSearchResult[T]
-	ProcessingTimeMs int64
-}
-
 // ============================================================================
 // Searcher (Fluent API)
 // ============================================================================
@@ -59,20 +53,24 @@ func (s *Searcher[T]) WithContext(ctx context.Context) *Searcher[T] {
 	}
 }
 
-// Search performs a typed search with auto-detected index name.
+// Index sets a custom index name, overriding the auto-detected one.
+//
+//	results, _ := gormsearch.Of[Product](gs).Index("archived_products").Search("macbook")
+func (s *Searcher[T]) Index(name string) *Searcher[T] {
+	return &Searcher[T]{
+		gs:        s.gs,
+		indexName: name,
+	}
+}
+
+// Search performs a typed search with the configured index name.
+// Note: Index() takes priority over WithIndexName option.
 func (s *Searcher[T]) Search(query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
+	// Append the stored index name at the end so it takes priority
+	if s.indexName != "" {
+		opts = append(opts, WithIndexName(s.indexName))
+	}
 	return SearchFor[T](s.gs, query, opts...)
-}
-
-// SearchIndex performs a typed search on a specific index.
-func (s *Searcher[T]) SearchIndex(indexName, query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	opts = append(opts, WithIndexName(indexName))
-	return SearchFor[T](s.gs, query, opts...)
-}
-
-// MultiSearch performs a typed multi-search.
-func (s *Searcher[T]) MultiSearch(queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	return MultiSearchFor[T](s.gs, queries...)
 }
 
 // ============================================================================
@@ -124,66 +122,6 @@ func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*Type
 		Offset:            result.Offset,
 		EstimatedTotal:    result.EstimatedTotal,
 		FacetDistribution: result.FacetDistribution,
-	}, nil
-}
-
-// MultiSearchFor performs a typed multi-search.
-func MultiSearchFor[T any](gs *GormSearch, queries ...SearchQuery) (*TypedMultiSearchResult[T], error) {
-	// For multi-search, index names are in the queries themselves.
-	// But wait, `SearchQuery` struct has `IndexName`.
-	// The generic wrapper usually implies the result type T.
-	// If `queries` have explicit IndexName, we use them.
-	// If `queries` have empty IndexName, should we fill it?
-	// The current logic of `searchAs` (renamed to internal logic) was:
-	// func multiSearchAs[T any](gs *GormSearch, queries ...SearchQuery)
-	// It passed queries directly to `MultiSearchRaw`.
-	// `MultiSearchRaw` executes them.
-	// If the user uses `MultiSearchFor[T]`, they construct `SearchQuery`.
-	// `SearchQuery` has `IndexName`.
-	// Let's iterate and fill missing index names?
-
-	// We'll rename `multiSearchAs` logic to here and improve it.
-
-	for i := range queries {
-		if queries[i].IndexName == "" {
-			queries[i].IndexName = indexNameFor[T]()
-		}
-	}
-
-	result, err := gs.MultiSearchRaw(queries...)
-	if err != nil {
-		return nil, err
-	}
-
-	typedResults := make([]TypedSearchResult[T], 0, len(result.Results))
-	for _, r := range result.Results {
-		var hits []T
-		if gs.config != nil && gs.config.MapDecoder != nil {
-			if err := gs.config.MapDecoder(r.Hits, &hits); err != nil {
-				return nil, err
-			}
-		} else {
-			var err error
-			hits, err = decodeHitsWithInstance[T](gs, r.Hits)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		typedResults = append(typedResults, TypedSearchResult[T]{
-			Hits:              hits,
-			Query:             r.Query,
-			ProcessingTimeMs:  r.ProcessingTimeMs,
-			Limit:             r.Limit,
-			Offset:            r.Offset,
-			EstimatedTotal:    r.EstimatedTotal,
-			FacetDistribution: r.FacetDistribution,
-		})
-	}
-
-	return &TypedMultiSearchResult[T]{
-		Results:          typedResults,
-		ProcessingTimeMs: result.ProcessingTimeMs,
 	}, nil
 }
 
@@ -281,6 +219,12 @@ type TypedQuery struct {
 	decodeCustom  func([]map[string]any, MapDecoder) error
 }
 
+// As sets a unique key for the query to be used in MultiSearch results.
+func (q TypedQuery) As(key string) TypedQuery {
+	q.opts.Key = key
+	return q
+}
+
 // Query creates a typed query with auto-detected index name.
 //
 //	gormsearch.Query(&products, "macbook")
@@ -355,8 +299,8 @@ func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption)
 //	    gormsearch.Query(&products, "macbook"),
 //	    gormsearch.Query(&categories, "electronics"),
 //	)
-//	fmt.Println("Total Products:", results[0].EstimatedTotal)
-func (gs *GormSearch) MultiSearch(queries ...TypedQuery) ([]SearchResult, error) {
+//	fmt.Println("Total Products:", results.Results[0].EstimatedTotal)
+func (gs *GormSearch) MultiSearch(queries ...TypedQuery) (*MultiSearchResult, error) {
 	if len(queries) == 0 {
 		return nil, nil
 	}
@@ -365,12 +309,29 @@ func (gs *GormSearch) MultiSearch(queries ...TypedQuery) ([]SearchResult, error)
 	searchQueries := make([]SearchQuery, 0, len(queries))
 	for _, q := range queries {
 		searchQueries = append(searchQueries, SearchQuery{
-			IndexName: q.indexName,
-			Query:     q.query,
-			Limit:     q.opts.Limit,
-			Offset:    q.opts.Offset,
-			Filter:    q.opts.Filter,
-			Sort:      q.opts.Sort,
+			IndexName:               q.indexName,
+			Query:                   q.query,
+			Limit:                   q.opts.Limit,
+			Offset:                  q.opts.Offset,
+			Filter:                  q.opts.Filter,
+			Sort:                    q.opts.Sort,
+			Facets:                  q.opts.Facets,
+			AttributesToRetrieve:    q.opts.AttributesToRetrieve,
+			AttributesToSearchOn:    q.opts.AttributesToSearchOn,
+			AttributesToCrop:        q.opts.AttributesToCrop,
+			CropLength:              q.opts.CropLength,
+			CropMarker:              q.opts.CropMarker,
+			AttributesToHighlight:   q.opts.Highlight, // Mapping SearchOptions.Highlight to SearchQuery.AttributesToHighlight
+			HighlightPreTag:         q.opts.HighlightPreTag,
+			HighlightPostTag:        q.opts.HighlightPostTag,
+			MatchingStrategy:        q.opts.MatchingStrategy,
+			ShowMatchesPosition:     q.opts.ShowMatchesPosition,
+			ShowRankingScore:        q.opts.ShowRankingScore,
+			ShowRankingScoreDetails: q.opts.ShowRankingScoreDetails,
+			HitsPerPage:             q.opts.HitsPerPage,
+			Page:                    q.opts.Page,
+			Distinct:                q.opts.Distinct,
+			Key:                     q.opts.Key,
 		})
 	}
 
@@ -380,25 +341,12 @@ func (gs *GormSearch) MultiSearch(queries ...TypedQuery) ([]SearchResult, error)
 		return nil, err
 	}
 
-	metadataResults := make([]SearchResult, 0, len(results.Results))
-
 	// Decode each result using pre-built closures (no reflection)
 	for i, q := range queries {
 		if i >= len(results.Results) {
 			break
 		}
 		r := results.Results[i]
-
-		// Save metadata AND hits
-		metadataResults = append(metadataResults, SearchResult{
-			Query:             r.Query,
-			ProcessingTimeMs:  r.ProcessingTimeMs,
-			Limit:             r.Limit,
-			Offset:            r.Offset,
-			EstimatedTotal:    r.EstimatedTotal,
-			FacetDistribution: r.FacetDistribution,
-			Hits:              r.Hits, // Include raw hits
-		})
 
 		if gs.config != nil && gs.config.MapDecoder != nil {
 			if err := q.decodeCustom(r.Hits, gs.config.MapDecoder); err != nil {
@@ -412,5 +360,5 @@ func (gs *GormSearch) MultiSearch(queries ...TypedQuery) ([]SearchResult, error)
 		}
 	}
 
-	return metadataResults, nil
+	return results, nil
 }

@@ -154,6 +154,7 @@ type fieldInfo struct {
 // ============================================================================
 
 // SearchResult wraps the search response from Meilisearch.
+// SearchResult wraps the search response from Meilisearch.
 type SearchResult struct {
 	Hits              []map[string]any
 	Query             string
@@ -162,32 +163,70 @@ type SearchResult struct {
 	Offset            int64
 	EstimatedTotal    int64
 	FacetDistribution map[string]map[string]int64
+	HitsPerPage       int64
+	Page              int64
+	TotalPages        int64
+	TotalHits         int64
 }
 
 // SearchOptions holds options for search queries.
 type SearchOptions struct {
-	Limit     int64
-	Offset    int64
-	Filter    string
-	Sort      []string
-	Facets    []string
-	Highlight []string
-	IndexName string
+	Limit                   int64
+	Offset                  int64
+	Filter                  any // Changed from string to any to support complex filters
+	Sort                    []string
+	Facets                  []string
+	Highlight               []string
+	IndexName               string
+	AttributesToRetrieve    []string
+	AttributesToSearchOn    []string
+	AttributesToCrop        []string
+	CropLength              int64
+	CropMarker              string
+	HighlightPreTag         string
+	HighlightPostTag        string
+	MatchingStrategy        string // "all" or "last"
+	ShowMatchesPosition     bool
+	ShowRankingScore        bool
+	ShowRankingScoreDetails bool
+	HitsPerPage             int64
+	Page                    int64
+	Distinct                string
+	Key                     string // Key is used to identify the query in MultiSearchResult.ByKey
 }
 
 // SearchQuery represents a single query for MultiSearch.
 type SearchQuery struct {
-	IndexName string
-	Query     string
-	Limit     int64
-	Offset    int64
-	Filter    string
-	Sort      []string
+	IndexName               string
+	Query                   string
+	Limit                   int64
+	Offset                  int64
+	Filter                  any
+	Sort                    []string
+	Facets                  []string
+	IgnoreFields            []string // Deprecated? No, used in gorm but checking usage... let's stick to Meilisearch params
+	AttributesToRetrieve    []string
+	AttributesToSearchOn    []string
+	AttributesToCrop        []string
+	CropLength              int64
+	CropMarker              string
+	AttributesToHighlight   []string
+	HighlightPreTag         string
+	HighlightPostTag        string
+	MatchingStrategy        string
+	ShowMatchesPosition     bool
+	ShowRankingScore        bool
+	ShowRankingScoreDetails bool
+	HitsPerPage             int64
+	Page                    int64
+	Distinct                string
+	Key                     string // Key is identification for MultiSearchResult
 }
 
 // MultiSearchResult wraps multiple search results.
 type MultiSearchResult struct {
 	Results          []SearchResult
+	ByKey            map[string]SearchResult
 	ProcessingTimeMs int64
 }
 

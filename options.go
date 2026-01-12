@@ -37,7 +37,7 @@ func WithOffset(offset int64) SearchOption {
 }
 
 // WithFilter sets a filter expression for the search.
-func WithFilter(filter string) SearchOption {
+func WithFilter(filter any) SearchOption {
 	return func(o *SearchOptions) {
 		o.Filter = filter
 	}
@@ -86,6 +86,104 @@ func WithFacets(facets ...string) SearchOption {
 func WithHighlight(attrs ...string) SearchOption {
 	return func(o *SearchOptions) {
 		o.Highlight = attrs
+	}
+}
+
+// WithAttributesToRetrieve sets the list of attributes to retrieve.
+func WithAttributesToRetrieve(attrs ...string) SearchOption {
+	return func(o *SearchOptions) {
+		o.AttributesToRetrieve = attrs
+	}
+}
+
+// WithAttributesToSearchOn sets the list of attributes to search on.
+func WithAttributesToSearchOn(attrs ...string) SearchOption {
+	return func(o *SearchOptions) {
+		o.AttributesToSearchOn = attrs
+	}
+}
+
+// WithAttributesToCrop sets the list of attributes to crop.
+func WithAttributesToCrop(attrs ...string) SearchOption {
+	return func(o *SearchOptions) {
+		o.AttributesToCrop = attrs
+	}
+}
+
+// WithCropLength sets the length of the crop.
+func WithCropLength(length int64) SearchOption {
+	return func(o *SearchOptions) {
+		o.CropLength = length
+	}
+}
+
+// WithCropMarker sets the marker to indicate cropped text.
+func WithCropMarker(marker string) SearchOption {
+	return func(o *SearchOptions) {
+		o.CropMarker = marker
+	}
+}
+
+// WithHighlightPreTag sets the pre-tag for highlighting.
+func WithHighlightPreTag(tag string) SearchOption {
+	return func(o *SearchOptions) {
+		o.HighlightPreTag = tag
+	}
+}
+
+// WithHighlightPostTag sets the post-tag for highlighting.
+func WithHighlightPostTag(tag string) SearchOption {
+	return func(o *SearchOptions) {
+		o.HighlightPostTag = tag
+	}
+}
+
+// WithMatchingStrategy sets the matching strategy ("all" or "last").
+func WithMatchingStrategy(strategy string) SearchOption {
+	return func(o *SearchOptions) {
+		o.MatchingStrategy = strategy
+	}
+}
+
+// WithShowMatchesPosition enables returning matches position in results.
+func WithShowMatchesPosition(show bool) SearchOption {
+	return func(o *SearchOptions) {
+		o.ShowMatchesPosition = show
+	}
+}
+
+// WithShowRankingScore enables returning ranking score in results.
+func WithShowRankingScore(show bool) SearchOption {
+	return func(o *SearchOptions) {
+		o.ShowRankingScore = show
+	}
+}
+
+// WithShowRankingScoreDetails enables returning ranking score details in results.
+func WithShowRankingScoreDetails(show bool) SearchOption {
+	return func(o *SearchOptions) {
+		o.ShowRankingScoreDetails = show
+	}
+}
+
+// WithHitsPerPage sets the number of hits per page for pagination.
+func WithHitsPerPage(n int64) SearchOption {
+	return func(o *SearchOptions) {
+		o.HitsPerPage = n
+	}
+}
+
+// WithPage sets the page number for pagination.
+func WithPage(n int64) SearchOption {
+	return func(o *SearchOptions) {
+		o.Page = n
+	}
+}
+
+// WithDistinct sets the distinct attribute for the search.
+func WithDistinct(attr string) SearchOption {
+	return func(o *SearchOptions) {
+		o.Distinct = attr
 	}
 }
 
@@ -166,6 +264,13 @@ func WithQueue(publish func(ctx context.Context, data []byte) error) Option {
 			publish: publish,
 			// Encoder will be injected in New() based on configuration
 		}
+	}
+}
+
+// WithKey sets a unique key for the query to be used in MultiSearch results.
+func WithKey(key string) SearchOption {
+	return func(o *SearchOptions) {
+		o.Key = key
 	}
 }
 
