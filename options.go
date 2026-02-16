@@ -9,9 +9,12 @@ type Option func(*Config)
 type SearchOption func(*SearchOptions)
 
 // WithBatchSize sets the batch size for bulk operations.
+// Values less than 1 are ignored.
 func WithBatchSize(size int) Option {
 	return func(c *Config) {
-		c.BatchSize = size
+		if size > 0 {
+			c.BatchSize = size
+		}
 	}
 }
 
