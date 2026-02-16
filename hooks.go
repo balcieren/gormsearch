@@ -11,17 +11,32 @@ import (
 func (gs *GormSearch) registerCallbacks(config *IndexConfig) {
 	prefix := "gormsearch:" + config.IndexName
 
-	gs.db.Callback().Create().After("gorm:create").Register(prefix+":create", func(db *gorm.DB) {
+	createCB := gs.db.Callback().Create().After("gorm:create")
+	if err := createCB.Register(prefix+":create", func(db *gorm.DB) {
 		gs.syncDocument(db, config, opCreate)
-	})
+	}); err != nil {
+		createCB.Replace(prefix+":create", func(db *gorm.DB) {
+			gs.syncDocument(db, config, opCreate)
+		})
+	}
 
-	gs.db.Callback().Update().After("gorm:update").Register(prefix+":update", func(db *gorm.DB) {
+	updateCB := gs.db.Callback().Update().After("gorm:update")
+	if err := updateCB.Register(prefix+":update", func(db *gorm.DB) {
 		gs.syncDocument(db, config, opUpdate)
-	})
+	}); err != nil {
+		updateCB.Replace(prefix+":update", func(db *gorm.DB) {
+			gs.syncDocument(db, config, opUpdate)
+		})
+	}
 
-	gs.db.Callback().Delete().After("gorm:delete").Register(prefix+":delete", func(db *gorm.DB) {
+	deleteCB := gs.db.Callback().Delete().After("gorm:delete")
+	if err := deleteCB.Register(prefix+":delete", func(db *gorm.DB) {
 		gs.syncDocument(db, config, opDelete)
-	})
+	}); err != nil {
+		deleteCB.Replace(prefix+":delete", func(db *gorm.DB) {
+			gs.syncDocument(db, config, opDelete)
+		})
+	}
 }
 
 type operation int
