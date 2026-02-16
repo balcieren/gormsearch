@@ -154,7 +154,6 @@ type fieldInfo struct {
 // ============================================================================
 
 // SearchResult wraps the search response from Meilisearch.
-// SearchResult wraps the search response from Meilisearch.
 type SearchResult struct {
 	Hits              []map[string]any
 	Query             string
