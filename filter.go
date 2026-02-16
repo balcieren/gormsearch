@@ -116,6 +116,52 @@ func formatValue(v any) string {
 	}
 }
 
+// Not wraps a sub-filter with NOT.
+func (f *FilterBuilder) Not(fn func(*FilterBuilder)) *FilterBuilder {
+	sub := NewFilter()
+	fn(sub)
+	if len(sub.parts) > 0 {
+		f.parts = append(f.parts, "NOT "+sub.Build())
+	}
+	return f
+}
+
+// IsNull adds an IS NULL check on the field.
+func (c *Condition) IsNull() *FilterBuilder {
+	c.builder.parts = append(c.builder.parts, fmt.Sprintf("%s IS NULL", c.field))
+	return c.builder
+}
+
+// IsNotNull adds an IS NOT NULL check on the field.
+func (c *Condition) IsNotNull() *FilterBuilder {
+	c.builder.parts = append(c.builder.parts, fmt.Sprintf("%s IS NOT NULL", c.field))
+	return c.builder
+}
+
+// Exists adds an EXISTS check on the field.
+func (c *Condition) Exists() *FilterBuilder {
+	c.builder.parts = append(c.builder.parts, fmt.Sprintf("%s EXISTS", c.field))
+	return c.builder
+}
+
+// NotExists adds a NOT EXISTS check on the field.
+func (c *Condition) NotExists() *FilterBuilder {
+	c.builder.parts = append(c.builder.parts, fmt.Sprintf("%s NOT EXISTS", c.field))
+	return c.builder
+}
+
+// IsEmpty adds an IS EMPTY check on the field.
+func (c *Condition) IsEmpty() *FilterBuilder {
+	c.builder.parts = append(c.builder.parts, fmt.Sprintf("%s IS EMPTY", c.field))
+	return c.builder
+}
+
+// IsNotEmpty adds an IS NOT EMPTY check on the field.
+func (c *Condition) IsNotEmpty() *FilterBuilder {
+	c.builder.parts = append(c.builder.parts, fmt.Sprintf("%s IS NOT EMPTY", c.field))
+	return c.builder
+}
+
 // GeoRadius adds a _geoRadius filter.
 func (f *FilterBuilder) GeoRadius(lat, lng, distanceInMeters float64) *FilterBuilder {
 	f.parts = append(f.parts, fmt.Sprintf("_geoRadius(%f, %f, %f)", lat, lng, distanceInMeters))
