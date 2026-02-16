@@ -213,7 +213,9 @@ func (gs *GormSearch) decodeDocument(doc map[string]any, dest any) error {
 	// Find config
 	// Optimization: Use registryByType for O(1) lookup
 	typeName := v.Type().Name()
+	gs.mu.RLock()
 	config := gs.registryByType[typeName]
+	gs.mu.RUnlock()
 
 	if config == nil {
 		// If config not found, fallback to JSON (slower but safe)
