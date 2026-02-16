@@ -5,6 +5,7 @@ package gormsearch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"sync"
 
@@ -64,6 +65,10 @@ func New(db *gorm.DB, client meilisearch.ServiceManager, opts ...Option) (*GormS
 
 // WithContext returns a shallow copy of GormSearch with the given context.
 // This allows chaining methods with a request-scoped context.
+//
+// Note: The returned copy shares the registry, config, and mutex with the original.
+// It is safe for concurrent read operations (Search, Sync) but Register()
+// should only be called on the original instance.
 func (gs *GormSearch) WithContext(ctx context.Context) *GormSearch {
 	newGS := *gs
 	newGS.ctx = ctx
@@ -124,7 +129,11 @@ func (gs *GormSearch) configureIndex(config *IndexConfig) error {
 		PrimaryKey: config.PrimaryKey,
 	})
 	if err != nil {
-		// Index might already exist, continue with settings update
+		// Only ignore "index already exists" errors
+		var meiliErr *meilisearch.Error
+		if !errors.As(err, &meiliErr) || meiliErr.MeilisearchApiError.Code != "index_already_exists" {
+			return err
+		}
 	}
 
 	settings := gs.buildSettings(config)
@@ -191,14 +200,29 @@ func (gs *GormSearch) Sync(model any) error {
 		return ErrNilModel
 	}
 
-	config, err := parseModel(model)
-	if err != nil {
-		return err
+	// Try to reuse registered config for consistency with Register()
+	var config *IndexConfig
+	modelTypeName := reflect.TypeOf(model).String()
+	if t := reflect.TypeOf(model); t.Kind() == reflect.Ptr {
+		modelTypeName = t.Elem().Name()
+	} else {
+		modelTypeName = t.Name()
 	}
 
-	// Apply index prefix if configured
-	if gs.config.IndexPrefix != "" {
-		config.IndexName = gs.config.IndexPrefix + config.IndexName
+	gs.mu.RLock()
+	config = gs.registryByType[modelTypeName]
+	gs.mu.RUnlock()
+
+	if config == nil {
+		var err error
+		config, err = parseModel(model)
+		if err != nil {
+			return err
+		}
+		// Apply index prefix if configured
+		if gs.config.IndexPrefix != "" {
+			config.IndexName = gs.config.IndexPrefix + config.IndexName
+		}
 	}
 
 	index := gs.client.Index(config.IndexName)
@@ -219,6 +243,7 @@ func (gs *GormSearch) Sync(model any) error {
 	// We start with nil capacity and let append grow it as needed, or we could estimate.
 	var documents []any
 
+	var err error
 	err = gs.db.WithContext(ctx).Model(model).FindInBatches(slicePtr.Interface(), gs.config.BatchSize, func(tx *gorm.DB, batch int) error {
 		// Check context cancellation
 		select {
