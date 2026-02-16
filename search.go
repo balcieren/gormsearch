@@ -197,16 +197,19 @@ func clampLimit(limit int64) int64 {
 	return limit
 }
 
-// convertHits converts Meilisearch hits to a slice of maps.
+// convertHits converts Meilisearch hits (map[string]json.RawMessage) to a slice of maps.
 func convertHits(hits meilisearch.Hits) []map[string]any {
-	// Optimization: Avoid json.Unmarshal overhead.
-	// We still need to copy the map because map[string]interface{} != map[string]any in Go's type system.
+	if hits == nil {
+		return nil
+	}
 	result := make([]map[string]any, 0, len(hits))
 	for _, hit := range hits {
 		m := make(map[string]any, len(hit))
-		for k, v := range hit {
-			// hit values are interface{}, direct assignment works
-			m[k] = v
+		for k, raw := range hit {
+			var v any
+			if err := json.Unmarshal(raw, &v); err == nil {
+				m[k] = v
+			}
 		}
 		result = append(result, m)
 	}
@@ -219,9 +222,20 @@ func parseFacets(raw json.RawMessage) map[string]map[string]int64 {
 		return nil
 	}
 
-	var result map[string]map[string]int64
-	if err := json.Unmarshal(raw, &result); err != nil {
+	// JSON numbers are decoded as float64 by default, so we unmarshal
+	// into float64 first and then convert to int64.
+	var rawResult map[string]map[string]float64
+	if err := json.Unmarshal(raw, &rawResult); err != nil {
 		return nil
+	}
+
+	result := make(map[string]map[string]int64, len(rawResult))
+	for attr, facets := range rawResult {
+		converted := make(map[string]int64, len(facets))
+		for key, val := range facets {
+			converted[key] = int64(val)
+		}
+		result[attr] = converted
 	}
 	return result
 }
