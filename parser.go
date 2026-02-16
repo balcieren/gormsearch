@@ -36,7 +36,9 @@ func parseModel(model any) (*IndexConfig, error) {
 func parseFieldsRecursive(t reflect.Type, config *IndexConfig, parentIndex []int) {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		currIndex := append(parentIndex, i)
+		currIndex := make([]int, len(parentIndex)+1)
+		copy(currIndex, parentIndex)
+		currIndex[len(parentIndex)] = i
 
 		// Skip unexported fields (unless anonymous/embedded)
 		if !field.IsExported() {
