@@ -43,7 +43,7 @@ type Searcher[T any] struct {
 func Of[T any](gs *GormSearch) *Searcher[T] {
 	return &Searcher[T]{
 		gs:        gs,
-		indexName: indexNameFor[T](),
+		indexName: indexNameForGS[T](gs),
 	}
 }
 
@@ -96,7 +96,7 @@ func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*Type
 
 	indexName := tempOpts.IndexName
 	if indexName == "" {
-		indexName = indexNameFor[T]()
+		indexName = indexNameForGS[T](gs)
 	}
 
 	// 2. Perform search
@@ -138,7 +138,7 @@ func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*Type
 // Internal
 // ============================================================================
 
-// indexNameFor returns the index name for a generic type T.
+// indexNameFor returns the base index name for a generic type T (without prefix).
 // It uses caching to avoid repeated reflection lookups.
 func indexNameFor[T any]() string {
 	var zero T
@@ -162,6 +162,35 @@ func indexNameFor[T any]() string {
 
 	indexNameCache.Store(key, config.IndexName)
 	return config.IndexName
+}
+
+// indexNameForGS returns the index name for a generic type T, applying the IndexPrefix if configured.
+func indexNameForGS[T any](gs *GormSearch) string {
+	// First check if the type is registered (which already has the prefix applied)
+	var zero T
+	t := reflect.TypeOf(zero)
+	if t == nil {
+		t = reflect.TypeOf(&zero).Elem()
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	typeName := t.Name()
+	gs.mu.RLock()
+	config := gs.registryByType[typeName]
+	gs.mu.RUnlock()
+
+	if config != nil {
+		return config.IndexName // Already has prefix
+	}
+
+	// Fallback: compute base name and apply prefix
+	baseName := indexNameFor[T]()
+	if gs.config != nil && gs.config.IndexPrefix != "" {
+		return gs.config.IndexPrefix + baseName
+	}
+	return baseName
 }
 
 // DecodeHits decodes raw hits into a typed slice.
