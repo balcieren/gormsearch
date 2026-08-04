@@ -246,4 +246,15 @@ func newWorkerPool(size int) *workerPool {
 }
 
 func (p *workerPool) acquire() { p.sem <- struct{}{} }
+
+// acquireCtx blocks until a slot is available or the context is cancelled.
+func (p *workerPool) acquireCtx(ctx context.Context) error {
+	select {
+	case p.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (p *workerPool) release() { <-p.sem }

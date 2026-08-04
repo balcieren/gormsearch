@@ -70,9 +70,13 @@ func (s *Searcher[T]) Index(name string) *Searcher[T] {
 // Search performs a typed search with the configured index name.
 // Note: Index() takes priority over WithIndexName option.
 func (s *Searcher[T]) Search(query string, opts ...SearchOption) (*TypedSearchResult[T], error) {
-	// Append the stored index name at the end so it takes priority
+	// Append the stored index name at the end so it takes priority.
+	// Build a new slice to avoid mutating the caller's backing array.
 	if s.indexName != "" {
-		opts = append(opts, WithIndexName(s.indexName))
+		newOpts := make([]SearchOption, 0, len(opts)+1)
+		newOpts = append(newOpts, opts...)
+		newOpts = append(newOpts, WithIndexName(s.indexName))
+		opts = newOpts
 	}
 	return SearchFor[T](s.gs, query, opts...)
 }
@@ -146,8 +150,14 @@ func indexNameFor[T any]() string {
 	if t == nil {
 		t = reflect.TypeOf(&zero).Elem()
 	}
-	if t.Kind() == reflect.Ptr {
+	// Dereference all pointer levels (supports T = *Product)
+	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
+	}
+
+	// Non-struct types can't be parsed; use the conventional fallback
+	if t.Kind() != reflect.Struct {
+		return toSnakeCase(t.Name()) + "s"
 	}
 
 	key := t.PkgPath() + "." + t.Name()
@@ -155,7 +165,9 @@ func indexNameFor[T any]() string {
 		return cached.(string)
 	}
 
-	config, err := parseModel(&zero)
+	// Parse a fresh instance so pointer-receiver methods
+	// (IndexName, TableName) are always in the method set.
+	config, err := parseModel(reflect.New(t).Interface())
 	if err != nil {
 		return toSnakeCase(t.Name()) + "s"
 	}
@@ -263,6 +275,23 @@ func (q TypedQuery) As(key string) TypedQuery {
 	return q
 }
 
+// resolveQueryIndex resolves a query's index name against the registry.
+// TypedQuery computes its index name without access to the GormSearch
+// instance, so IndexPrefix is not applied at that point. This resolves the
+// prefixed/registered name when available, matching SearchFor behavior.
+func (gs *GormSearch) resolveQueryIndex(name string) string {
+	if _, ok := gs.getConfig(name); ok {
+		return name
+	}
+	if gs.config != nil && gs.config.IndexPrefix != "" {
+		prefixed := gs.config.IndexPrefix + name
+		if _, ok := gs.getConfig(prefixed); ok {
+			return prefixed
+		}
+	}
+	return name
+}
+
 // Query creates a typed query with auto-detected index name.
 //
 //	gormsearch.Query(&products, "macbook")
@@ -347,7 +376,7 @@ func (gs *GormSearch) MultiSearch(queries ...TypedQuery) (*MultiSearchResult, er
 	searchQueries := make([]SearchQuery, 0, len(queries))
 	for _, q := range queries {
 		searchQueries = append(searchQueries, SearchQuery{
-			IndexName:               q.indexName,
+			IndexName:               gs.resolveQueryIndex(q.indexName),
 			Query:                   q.query,
 			Limit:                   q.opts.Limit,
 			Offset:                  q.opts.Offset,

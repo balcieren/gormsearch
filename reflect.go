@@ -37,7 +37,11 @@ func (gs *GormSearch) toDocument(model any, config *IndexConfig) map[string]any 
 	doc := make(map[string]any, len(config.FieldExtractors))
 
 	for _, extractor := range config.FieldExtractors {
-		val := v.FieldByIndex(extractor.FieldIndex)
+		// FieldByIndexErr safely handles nil embedded pointer structs
+		val, err := v.FieldByIndexErr(extractor.FieldIndex)
+		if err != nil {
+			continue
+		}
 
 		if extractor.IsGeo {
 			// Zero-allocation Geo extraction
@@ -82,7 +86,11 @@ func extractID(model any, config *IndexConfig) string {
 
 	// Optimization: Use cached field index if available
 	if len(config.IDFieldIndices) > 0 {
-		return valToString(v.FieldByIndex(config.IDFieldIndices))
+		idField, err := v.FieldByIndexErr(config.IDFieldIndices)
+		if err != nil {
+			return ""
+		}
+		return valToString(idField)
 	}
 
 	// Fallback to legacy lookup (should rarely happen if parsed correctly)
@@ -128,7 +136,11 @@ func isSoftDeleted(model any, config *IndexConfig) bool {
 
 	// Optimization: Use cached field index if available
 	if config != nil && len(config.DeletedAtIndex) > 0 {
-		return isDeletedAtSet(v.FieldByIndex(config.DeletedAtIndex))
+		deletedAt, err := v.FieldByIndexErr(config.DeletedAtIndex)
+		if err != nil {
+			return false
+		}
+		return isDeletedAtSet(deletedAt)
 	}
 
 	// Fallback to legacy lookup (DeletedAt or Model.DeletedAt)
@@ -233,8 +245,9 @@ func (gs *GormSearch) decodeDocument(doc map[string]any, dest any) error {
 			continue
 		}
 
-		field := v.FieldByIndex(extractor.FieldIndex)
-		if !field.CanSet() {
+		// FieldByIndexErr safely handles nil embedded pointer structs
+		field, err := v.FieldByIndexErr(extractor.FieldIndex)
+		if err != nil || !field.CanSet() {
 			continue
 		}
 
@@ -244,11 +257,13 @@ func (gs *GormSearch) decodeDocument(doc map[string]any, dest any) error {
 		// Reverse mapping (JSON -> Struct) for Geo:
 		if extractor.IsGeo {
 			if geoMap, ok := val.(map[string]any); ok {
+				// GeoLatIndex/GeoLngIndex are relative to the geo struct,
+				// which is the field we already traversed to above.
 				if lat, ok := geoMap["lat"].(float64); ok && len(extractor.GeoLatIndex) > 0 {
-					setFloat(v.FieldByIndex(extractor.GeoLatIndex), lat)
+					setFloat(field.FieldByIndex(extractor.GeoLatIndex), lat)
 				}
 				if lng, ok := geoMap["lng"].(float64); ok && len(extractor.GeoLngIndex) > 0 {
-					setFloat(v.FieldByIndex(extractor.GeoLngIndex), lng)
+					setFloat(field.FieldByIndex(extractor.GeoLngIndex), lng)
 				}
 			}
 			continue
@@ -261,8 +276,13 @@ func (gs *GormSearch) decodeDocument(doc map[string]any, dest any) error {
 	return nil
 }
 
+// stringSliceType is cached to fast-path []string decoding.
+var stringSliceType = reflect.TypeOf([]string(nil))
+
 // setFieldValue sets a struct field value from an interface{} value.
-// Handles type conversion for common types including strings, numbers, bools, and time.Time.
+// Handles type conversion for common types including strings, numbers, bools,
+// time.Time, and falls back to a JSON round-trip for complex types
+// (slices, maps, pointers, nested structs) so they are not silently dropped.
 func setFieldValue(field reflect.Value, val any) {
 	if val == nil {
 		return
@@ -297,8 +317,39 @@ func setFieldValue(field reflect.Value, val any) {
 					field.Set(reflect.ValueOf(t))
 				}
 			}
+			return
 		}
+		setFieldJSON(field, val)
+	case reflect.Slice:
+		// Fast path for the common []string case
+		if field.Type() == stringSliceType {
+			if arr, ok := val.([]any); ok {
+				strs := make([]string, 0, len(arr))
+				for _, item := range arr {
+					if s, ok := item.(string); ok {
+						strs = append(strs, s)
+					}
+				}
+				field.Set(reflect.ValueOf(strs))
+				return
+			}
+		}
+		setFieldJSON(field, val)
+	case reflect.Map, reflect.Ptr:
+		setFieldJSON(field, val)
 	}
+}
+
+// setFieldJSON decodes val into field via a JSON round-trip.
+// Used for complex types (slices, maps, pointers, nested structs) that the
+// scalar fast paths don't cover. Type mismatches are silently ignored,
+// consistent with the other decode paths.
+func setFieldJSON(field reflect.Value, val any) {
+	data, err := json.Marshal(val)
+	if err != nil {
+		return
+	}
+	_ = json.Unmarshal(data, field.Addr().Interface())
 }
 
 // setFloat sets a float value on a reflect.Value if it's a float type.

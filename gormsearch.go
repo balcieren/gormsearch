@@ -35,12 +35,14 @@ func New(db *gorm.DB, client meilisearch.ServiceManager, opts ...Option) (*GormS
 
 	// Initialize default dispatcher if none provided
 	if config.Dispatcher == nil {
-		config.Dispatcher = NewDefaultDispatcher(
+		dispatcher := NewDefaultDispatcher(
 			client,
 			config.MaxWorkers,
 			config.MaxRetries,
 			config.OnError,
 		)
+		dispatcher.async = config.Async
+		config.Dispatcher = dispatcher
 	}
 
 	// If using QueueDispatcher, inject the encoder
@@ -201,16 +203,14 @@ func (gs *GormSearch) Sync(model any) error {
 	}
 
 	// Try to reuse registered config for consistency with Register()
-	var config *IndexConfig
-	modelTypeName := reflect.TypeOf(model).String()
-	if t := reflect.TypeOf(model); t.Kind() == reflect.Ptr {
-		modelTypeName = t.Elem().Name()
-	} else {
-		modelTypeName = t.Name()
+	modelType := reflect.TypeOf(model)
+	for modelType.Kind() == reflect.Ptr {
+		modelType = modelType.Elem()
 	}
+	modelTypeName := modelType.Name()
 
 	gs.mu.RLock()
-	config = gs.registryByType[modelTypeName]
+	config := gs.registryByType[modelTypeName]
 	gs.mu.RUnlock()
 
 	if config == nil {
@@ -231,11 +231,8 @@ func (gs *GormSearch) Sync(model any) error {
 	opts := &meilisearch.DocumentOptions{PrimaryKey: &pk}
 
 	// Create a slice of the model type to load data into
-	// We need a pointer to a slice of structs
-	modelType := reflect.TypeOf(model)
-	if modelType.Kind() == reflect.Ptr {
-		modelType = modelType.Elem()
-	}
+	// We need a pointer to a slice of structs (modelType was already
+	// dereferenced above)
 	sliceType := reflect.SliceOf(modelType)
 	slicePtr := reflect.New(sliceType)
 

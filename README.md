@@ -328,7 +328,7 @@ GormSearch is built for high speed and efficient memory usage:
 - **Zero-Allocation**: reflection hot paths are cached.
 - **Buffer Reuse**: syncing reuses memory buffers to minimize GC pressure.
 - **O(1) Lookups**: internal registries use optimized maps for instant access.
-- **Async**: all updates are non-blocking by default.
+- **Async**: all updates are non-blocking by default, with a bounded worker pool that applies backpressure under heavy load (configurable via `WithMaxWorkers` and `WithAsync`).
 
 ## Advanced Features
 

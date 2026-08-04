@@ -14,21 +14,34 @@ type DefaultDispatcher struct {
 	pool       *workerPool
 	maxRetries int
 	onError    func(op string, err error)
+	async      bool
 }
 
 // NewDefaultDispatcher creates a new in-memory dispatcher.
+// The dispatcher runs asynchronously by default; GormSearch.New overrides
+// this based on the WithAsync option.
 func NewDefaultDispatcher(client meilisearch.ServiceManager, maxWorkers, maxRetries int, onError func(op string, err error)) *DefaultDispatcher {
 	return &DefaultDispatcher{
 		client:     client,
 		pool:       newWorkerPool(maxWorkers),
 		maxRetries: maxRetries,
 		onError:    onError,
+		async:      true,
 	}
 }
 
-// Dispatch executes the job asynchronously with context support.
+// Dispatch executes the job with context support.
 // The context is used for cancellation - if cancelled before the job starts,
 // the job will not be executed.
+//
+// In async mode the job runs in a goroutine. A worker slot is acquired
+// BEFORE the goroutine is spawned, so the number of in-flight jobs (and
+// goroutines) is bounded by the pool size: under sustained load Dispatch
+// blocks until a slot frees up, applying natural backpressure instead of
+// piling up unbounded goroutines.
+//
+// In sync mode (WithAsync(false)) the job is executed inline and any
+// error is returned to the caller.
 func (d *DefaultDispatcher) Dispatch(ctx context.Context, job Job) error {
 	// Check if context is already cancelled
 	select {
@@ -37,11 +50,30 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, job Job) error {
 	default:
 	}
 
-	go d.safeGo(ctx, job, func() error {
-		return d.retryWithContext(ctx, func() error {
-			return d.executeWithContext(ctx, job)
+	// Synchronous mode: execute inline without goroutine overhead
+	if !d.async {
+		if err := d.run(ctx, job); err != nil {
+			if d.onError != nil {
+				d.onError(job.Operation, err)
+			}
+			return err
+		}
+		return nil
+	}
+
+	// Acquire a worker slot before spawning the goroutine (see doc above).
+	if err := d.pool.acquireCtx(ctx); err != nil {
+		return err
+	}
+
+	go func() {
+		defer d.pool.release()
+		d.safeGo(ctx, job, func() error {
+			return d.retryWithContext(ctx, func() error {
+				return d.executeWithContext(ctx, job)
+			})
 		})
-	})
+	}()
 	return nil
 }
 
@@ -78,18 +110,9 @@ func (d *DefaultDispatcher) executeWithContext(ctx context.Context, job Job) err
 	return ExecuteWithContext(ctx, d.client, job)
 }
 
-// safeGo executes a function with panic recovery and worker pool.
+// safeGo executes a function with panic recovery, reporting errors via onError.
+// The caller is responsible for worker pool acquisition.
 func (d *DefaultDispatcher) safeGo(ctx context.Context, job Job, fn func() error) {
-	// Check context before acquiring worker
-	select {
-	case <-ctx.Done():
-		return
-	default:
-	}
-
-	d.pool.acquire()
-	defer d.pool.release()
-
 	defer func() {
 		if r := recover(); r != nil && d.onError != nil {
 			d.onError(job.Operation, &panicError{value: r})
@@ -99,6 +122,19 @@ func (d *DefaultDispatcher) safeGo(ctx context.Context, job Job, fn func() error
 	if err := fn(); err != nil && d.onError != nil {
 		d.onError(job.Operation, err)
 	}
+}
+
+// run executes a job with retries and panic recovery, returning any error.
+// Used by the synchronous dispatch path.
+func (d *DefaultDispatcher) run(ctx context.Context, job Job) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = &panicError{value: r}
+		}
+	}()
+	return d.retryWithContext(ctx, func() error {
+		return d.executeWithContext(ctx, job)
+	})
 }
 
 // retryWithContext executes a function with exponential backoff and context support.
@@ -125,12 +161,14 @@ func (d *DefaultDispatcher) retryWithContext(ctx context.Context, fn func() erro
 			// Exponential backoff: 100ms, 200ms, 400ms...
 			backoff := time.Duration(100*(1<<i)) * time.Millisecond
 
+			timer := time.NewTimer(backoff)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return lastErr
-			case <-time.After(backoff):
-				continue
+			case <-timer.C:
 			}
+			continue
 		}
 		return nil
 	}

@@ -10,7 +10,8 @@ import (
 // parseModel extracts index configuration from a model using struct tags.
 func parseModel(model any) (*IndexConfig, error) {
 	t := reflect.TypeOf(model)
-	if t.Kind() == reflect.Ptr {
+	// Dereference all pointer levels (e.g., *Product, **Product)
+	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 
@@ -34,6 +35,11 @@ func parseModel(model any) (*IndexConfig, error) {
 
 // parseFieldsRecursive walks the struct type tree to find all fields and build extractors.
 func parseFieldsRecursive(t reflect.Type, config *IndexConfig, parentIndex []int) {
+	// Defensive: only structs have fields
+	if t.Kind() != reflect.Struct {
+		return
+	}
+
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		currIndex := make([]int, len(parentIndex)+1)
@@ -45,10 +51,18 @@ func parseFieldsRecursive(t reflect.Type, config *IndexConfig, parentIndex []int
 			continue
 		}
 
-		// Handle embedded structs
+		// Handle embedded structs (including pointer embeds like *gorm.Model)
 		if field.Anonymous {
-			parseFieldsRecursive(field.Type, config, currIndex)
-			continue
+			ft := field.Type
+			for ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				parseFieldsRecursive(ft, config, currIndex)
+				continue
+			}
+			// Non-struct embedded types (e.g. custom string types) fall
+			// through to be treated as regular fields.
 		}
 
 		// Parse tags
