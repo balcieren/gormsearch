@@ -8,7 +8,7 @@ A minimalist Go library that provides seamless integration between GORM and Meil
 ## Features
 
 - 🏷️ **Struct Tag Configuration** - Define searchable, filterable, sortable, primaryKey fields
-- 🔄 **Auto Sync** - GORM hooks automatically sync Create/Update/Delete operations
+- 🔄 **Auto Sync** - GORM hooks automatically sync Create/Update/Delete operations, including batch writes and conditional deletes
 - 🗑️ **Soft Delete Support** - Automatically removes from Meilisearch on soft delete
 - ⚡ **Async Mode** - Non-blocking operations with worker pool
 - 🔁 **Retry Logic** - Exponential backoff for failed operations with context-aware cancellation
@@ -18,6 +18,8 @@ A minimalist Go library that provides seamless integration between GORM and Meil
 - 🔒 **Safe by Default** - Input validation, panic recovery, limit enforcement
 
 ## Installation
+
+Requires **Go 1.27+**, GORM v2 and Meilisearch v1.x.
 
 ```bash
 go get github.com/balcieren/gormsearch
@@ -102,6 +104,7 @@ func main() {
 | `filterable` | Field can be filtered (`filter: "price > 100"`) |
 | `sortable`   | Field can be sorted (`sort: ["price:asc"]`)     |
 | `primaryKey` | Field is the primary key for Meilisearch index  |
+| `geo`        | Field holds coordinates, indexed as `_geo`      |
 | `-`          | Field is excluded from Meilisearch              |
 
 ```go
@@ -421,6 +424,31 @@ filter := f.Where("category").Eq("electronics").
 // Result: category = 'electronics' AND (price < 1000 OR on_sale = true)
 ```
 
+Available conditions: `Eq`, `Neq`, `Gt`, `Gte`, `Lt`, `Lte`, `In`, `IsNull`,
+`IsNotNull`, `IsEmpty`, `IsNotEmpty`, `Exists`, `NotExists`. Combine them with
+`And()`, `Or()`, `Group()` and `Not()`, plus `GeoRadius()` for geo queries.
+
+`Not()` always parenthesizes its sub-filter, so the negation applies to the
+whole expression rather than just the first condition:
+
+```go
+filter := gormsearch.NewFilter().Not(func(sub *gormsearch.FilterBuilder) {
+    sub.Where("status").Eq("archived").
+        And().
+        Where("views").Lt(10)
+}).Build()
+
+// Result: NOT (status = 'archived' AND views < 10)
+```
+
+String values are quoted and escaped for you — quotes and backslashes in user
+input cannot break out of the filter expression:
+
+```go
+gormsearch.NewFilter().Where("name").Eq("O'Brien").Build()
+// Result: name = 'O\'Brien'
+```
+
 ### 4. Multi-Tenancy
 
 Use `WithIndexPrefix` to isolate indexes for different tenants or environments.
@@ -449,12 +477,17 @@ Configure automatic retries with exponential backoff for failed Meilisearch oper
 
 ```go
 gs, _ := gormsearch.New(db, meili,
-    gormsearch.WithMaxRetries(3), // Retry up to 3 times on failure
+    gormsearch.WithMaxRetries(3), // 3 attempts in total (the default)
     gormsearch.WithOnError(func(op string, err error) {
         log.Printf("operation %s failed: %v", op, err)
     }),
 )
 ```
+
+`WithMaxRetries(n)` sets the **total** number of attempts, not the number of
+retries after the first one. Backoff doubles between attempts (100ms, 200ms,
+400ms, ...) and is skipped after the final attempt. A cancelled context aborts
+the wait and returns the last error.
 
 ## Custom Serialization
 

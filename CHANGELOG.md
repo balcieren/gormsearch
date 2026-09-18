@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimum Go version raised to **1.27**.
 - `SearchQuery.IgnoreFields` marked deprecated — it was never read.
 - Dead and misleading documentation cleaned up: `WithEncoder`/`WithDecoder` doc blocks were attached to the wrong functions, and `IndexRef.MultiSearch` claimed to scope queries to its own index.
+- README brought in line with the code: documented the Go version requirement, the missing `geo` struct tag, which statements sync automatically, the full `FilterBuilder` surface (including `Not()`'s parenthesization and automatic string escaping), and that `WithMaxRetries(n)` means *n total attempts*, not n retries after the first.
 
 ### 🧪 Testing
 
