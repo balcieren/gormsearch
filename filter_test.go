@@ -66,7 +66,7 @@ func TestFilterBuilder(t *testing.T) {
 			build: func() string {
 				return NewFilter().GeoRadius(45.5, 10.0, 2000).Build()
 			},
-			expected: "_geoRadius(45.500000, 10.000000, 2000.000000)",
+			expected: "_geoRadius(45.5, 10, 2000)",
 		},
 		{
 			name: "In",

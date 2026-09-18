@@ -104,11 +104,7 @@ func (gs *GormSearch) Register(model any) error {
 		config.IndexName = gs.config.IndexPrefix + config.IndexName
 	}
 
-	// Store in registry (thread-safe)
-	gs.mu.Lock()
-	gs.registry[config.IndexName] = config
-	gs.registryByType[config.ModelType] = config
-	gs.mu.Unlock()
+	gs.storeConfig(config)
 
 	// Configure Meilisearch index settings
 	if err := gs.configureIndex(config); err != nil {
@@ -116,7 +112,7 @@ func (gs *GormSearch) Register(model any) error {
 	}
 
 	// Register GORM callbacks
-	gs.registerCallbacks(config)
+	gs.registerCallbacks()
 
 	return nil
 }
@@ -152,15 +148,16 @@ func (gs *GormSearch) configureIndex(config *IndexConfig) error {
 
 // buildSettings constructs the final Meilisearch settings by merging custom provider settings and struct tags.
 func (gs *GormSearch) buildSettings(config *IndexConfig) *meilisearch.Settings {
-	var settings *meilisearch.Settings
+	settings := &meilisearch.Settings{}
 
-	// 1. Get settings from provider if available
+	// 1. Get settings from provider if available.
+	// Copy rather than merge in place: a provider commonly returns a shared
+	// package-level value, and mutating it would leak one model's tag-derived
+	// attributes into every other model using it.
 	if provider, ok := config.Model.(SettingProvider); ok {
-		settings = provider.MeiliSettings()
-	}
-
-	if settings == nil {
-		settings = &meilisearch.Settings{}
+		if provided := provider.MeiliSettings(); provided != nil {
+			*settings = *provided
+		}
 	}
 
 	// 2. Merge/Fallback to struct tag configurations
@@ -177,18 +174,13 @@ func (gs *GormSearch) buildSettings(config *IndexConfig) *meilisearch.Settings {
 	return settings
 }
 
-// hasSettings checks if any setting attribute is set.
+// hasSettings reports whether any setting is set.
+//
+// Comparing against the zero value covers every field Meilisearch supports,
+// including ones added later (DisplayedAttributes, Embedders, SearchCutoffMs,
+// ...); enumerating fields by hand silently dropped settings it missed.
 func hasSettings(s *meilisearch.Settings) bool {
-	return len(s.SearchableAttributes) > 0 ||
-		len(s.FilterableAttributes) > 0 ||
-		len(s.SortableAttributes) > 0 ||
-		len(s.RankingRules) > 0 ||
-		len(s.StopWords) > 0 ||
-		len(s.Synonyms) > 0 ||
-		s.DistinctAttribute != nil ||
-		s.TypoTolerance != nil ||
-		s.Faceting != nil ||
-		s.Pagination != nil
+	return s != nil && !reflect.DeepEqual(*s, meilisearch.Settings{})
 }
 
 // Sync manually syncs all records of a model to Meilisearch.
@@ -202,17 +194,13 @@ func (gs *GormSearch) Sync(model any) error {
 		return ErrNilModel
 	}
 
-	// Try to reuse registered config for consistency with Register()
-	modelType := reflect.TypeOf(model)
-	for modelType.Kind() == reflect.Ptr {
-		modelType = modelType.Elem()
+	modelType := structType(reflect.TypeOf(model))
+	if modelType == nil {
+		return ErrInvalidModel
 	}
-	modelTypeName := modelType.Name()
 
-	gs.mu.RLock()
-	config := gs.registryByType[modelTypeName]
-	gs.mu.RUnlock()
-
+	// Try to reuse registered config for consistency with Register()
+	config := gs.configForType(modelType)
 	if config == nil {
 		var err error
 		config, err = parseModel(model)
@@ -236,12 +224,10 @@ func (gs *GormSearch) Sync(model any) error {
 	sliceType := reflect.SliceOf(modelType)
 	slicePtr := reflect.New(sliceType)
 
-	// Optimization: Allocate reusable document buffer outside the loop
-	// We start with nil capacity and let append grow it as needed, or we could estimate.
+	// Optimization: reuse one document buffer across batches
 	var documents []any
 
-	var err error
-	err = gs.db.WithContext(ctx).Model(model).FindInBatches(slicePtr.Interface(), gs.config.BatchSize, func(tx *gorm.DB, batch int) error {
+	return gs.db.WithContext(ctx).Model(model).FindInBatches(slicePtr.Interface(), gs.config.BatchSize, func(tx *gorm.DB, batch int) error {
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
@@ -267,11 +253,9 @@ func (gs *GormSearch) Sync(model any) error {
 			// Encode each document using our standard logic (JSONEncoder or Reflection)
 			doc, err := gs.encodeDocument(item, config)
 			if err != nil {
-				// Log error and continue? Or fail batch?
-				// Using OnError callback if available, but for Sync we might want to return error
-				if gs.config.OnError != nil {
-					gs.config.OnError("sync_encode", err)
-				}
+				// Skip the record rather than abandoning the whole sync; the
+				// failure is surfaced through OnError.
+				gs.reportError("sync_encode", err)
 				continue
 			}
 			documents = append(documents, doc)
@@ -284,8 +268,6 @@ func (gs *GormSearch) Sync(model any) error {
 		}
 		return nil
 	}).Error
-
-	return err
 }
 
 // Client returns the underlying Meilisearch client.
@@ -296,6 +278,16 @@ func (gs *GormSearch) Client() meilisearch.ServiceManager {
 // DB returns the underlying GORM database instance.
 func (gs *GormSearch) DB() *gorm.DB {
 	return gs.db
+}
+
+// storeConfig publishes a parsed config to both registries (thread-safe).
+func (gs *GormSearch) storeConfig(config *IndexConfig) {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	gs.registry[config.IndexName] = config
+	if config.modelTypeKey != "" {
+		gs.registryByType[config.modelTypeKey] = config
+	}
 }
 
 // getConfig returns the IndexConfig for an index name (thread-safe).

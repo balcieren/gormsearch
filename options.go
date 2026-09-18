@@ -26,6 +26,7 @@ func WithAsync(async bool) Option {
 }
 
 // WithLimit sets the maximum number of results to return.
+// Values below 1 fall back to DefaultLimit; values above MaxLimit are capped.
 func WithLimit(limit int64) SearchOption {
 	return func(o *SearchOptions) {
 		o.Limit = limit
@@ -190,32 +191,32 @@ func WithDistinct(attr string) SearchOption {
 	}
 }
 
-// WithEncoder sets a custom encoder for converting models to Meilisearch documents.
-// Use this to integrate external serialization packages like sonic or msgpack.
+// WithMapEncoder sets a custom encoder for converting models to Meilisearch
+// documents. Use this to integrate external serialization packages.
 //
 //	gs, _ := gormsearch.New(db, meili,
-//	    gormsearch.WithEncoder(func(model any) (map[string]any, error) {
+//	    gormsearch.WithMapEncoder(func(model any) (map[string]any, error) {
 //	        // Custom encoding logic
 //	    }),
 //	)
-//
-// WithMapEncoder sets a custom map encoder function.
 func WithMapEncoder(enc MapEncoder) Option {
 	return func(c *Config) {
 		c.MapEncoder = enc
 	}
 }
 
-// WithDecoder sets a custom decoder for converting search hits to typed results.
-// The decoder receives raw hits and a pointer to destination slice.
+// WithMapDecoder sets a custom decoder for converting search hits to typed
+// results. The decoder receives raw hits and a pointer to a destination slice.
+//
+// Note that this opts out of the built-in decoder, which reads Meilisearch's
+// response bytes directly; hits handed to a MapDecoder have already been
+// through map[string]any, where JSON numbers become float64.
 //
 //	gs, _ := gormsearch.New(db, meili,
-//	    gormsearch.WithDecoder(func(hits []map[string]any, dest any) error {
+//	    gormsearch.WithMapDecoder(func(hits []map[string]any, dest any) error {
 //	        // Custom decoding logic
 //	    }),
 //	)
-//
-// WithMapDecoder sets a custom map decoder function.
 func WithMapDecoder(dec MapDecoder) Option {
 	return func(c *Config) {
 		c.MapDecoder = dec
@@ -252,7 +253,8 @@ func WithJSONEncoder(fn func(v any) ([]byte, error)) Option {
 	}
 }
 
-// WithJSONDecoder sets the JSON decoder function (e.g., json.Unmarshal).
+// WithJSONDecoder sets the JSON decoder used to turn search hits back into
+// structs (e.g., json.Unmarshal, or a faster drop-in like sonic).
 func WithJSONDecoder(fn func(data []byte, v any) error) Option {
 	return func(c *Config) {
 		c.JSONDecoder = fn

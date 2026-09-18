@@ -496,7 +496,7 @@ func TestDecodeDocument(t *testing.T) {
 
 	// Register a model
 	config, _ := parseModel(&CoverageTestModel{})
-	gs.registryByType[config.ModelType] = config
+	gs.storeConfig(config)
 
 	doc := map[string]any{
 		"id":   float64(1),

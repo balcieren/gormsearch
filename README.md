@@ -321,13 +321,31 @@ err := gs.WithContext(ctx).Sync(&Product{})
 gs.Sync(&Product{})
 ```
 
+### What gets synced automatically
+
+| Statement | Synced |
+| --- | --- |
+| `db.Create(&product)` | ✅ |
+| `db.Create(&[]Product{...})` | ✅ one job per record |
+| `db.Save(&product)` / `db.Model(&product).Update(...)` | ✅ full row is reloaded and re-indexed |
+| `db.Delete(&product)` | ✅ |
+| `db.Delete(&Product{}, id)` | ✅ |
+| `db.Where("price > ?", 100).Delete(&Product{})` | ✅ affected keys are resolved before the delete |
+| `db.Model(&Product{}).Where(...).Update(...)` | ❌ no primary key to work from |
+
+The last row is the one exception: a conditional update names no record, so
+there is nothing to re-index. It is reported through `WithOnError` as
+`ErrUnresolvedPrimaryKey`; load the rows and save them, or call `Sync`, if you
+need those changes indexed.
+
 ## Performance
 
 GormSearch is built for high speed and efficient memory usage:
 
 - **Zero-Allocation**: reflection hot paths are cached.
+- **Direct Decoding**: typed search decodes Meilisearch's response bytes straight into your struct, with no intermediate `map[string]any` (~1.7x faster and ~11x fewer allocations than decoding via maps).
 - **Buffer Reuse**: syncing reuses memory buffers to minimize GC pressure.
-- **O(1) Lookups**: internal registries use optimized maps for instant access.
+- **O(1) Lookups**: internal registries use optimized maps for instant access, and write callbacks cost the same whether you register 1 model or 50.
 - **Async**: all updates are non-blocking by default, with a bounded worker pool that applies backpressure under heavy load (configurable via `WithMaxWorkers` and `WithAsync`).
 
 ## Advanced Features
@@ -489,7 +507,12 @@ gs, err := gormsearch.New(db, meili,
 )
 ```
 
-This changes the internal behavior to pass `json.RawMessage` directly to Meilisearch-go, avoiding unnecessary reflection and map[string]interface{} allocations during sync operations.
+`WithJSONEncoder` passes `json.RawMessage` straight to Meilisearch-go when syncing; `WithJSONDecoder` is used to decode search hits back into your structs.
+
+> Note: `WithMapDecoder` opts out of this path. Hits handed to a `MapDecoder`
+> have already passed through `map[string]any`, where every JSON number becomes
+> a `float64` — so integers beyond 2^53 (Snowflake IDs and the like) lose
+> precision. The default decoder reads the raw bytes and keeps them exact.
 
 ## Async Workers & Queues
 
@@ -575,8 +598,18 @@ gs, _ := gormsearch.New(db, meili,
 gormsearch.ErrNilDB              // Database connection is nil
 gormsearch.ErrNilClient          // Meilisearch client is nil
 gormsearch.ErrNilModel           // Model is nil
+gormsearch.ErrInvalidModel       // Model is not a struct
 gormsearch.ErrIndexNotRegistered // Index not registered
 gormsearch.ErrQueryTooLong       // Query exceeds 1000 characters
+gormsearch.ErrNoQueries          // MultiSearch called without queries
+```
+
+These are reported through `WithOnError` rather than returned, because the
+write they relate to has already succeeded:
+
+```go
+gormsearch.ErrUnresolvedPrimaryKey // Write targeted rows by condition; nothing to sync
+gormsearch.ErrDeleteFanoutTooLarge // Conditional delete matched more rows than can be tracked
 ```
 
 ## License

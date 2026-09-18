@@ -10,15 +10,22 @@ import (
 // parseModel extracts index configuration from a model using struct tags.
 func parseModel(model any) (*IndexConfig, error) {
 	t := reflect.TypeOf(model)
+	if t == nil {
+		return nil, ErrNilModel
+	}
 	// Dereference all pointer levels (e.g., *Product, **Product)
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil, ErrInvalidModel
 	}
 
 	config := &IndexConfig{
 		IndexName:        resolveIndexName(model, t),
 		PrimaryKey:       "id",
 		ModelType:        t.Name(),
+		modelTypeKey:     typeKey(t),
 		SearchableFields: make([]string, 0),
 		FilterableFields: make([]string, 0),
 		SortableFields:   make([]string, 0),
@@ -51,6 +58,12 @@ func parseFieldsRecursive(t reflect.Type, config *IndexConfig, parentIndex []int
 			continue
 		}
 
+		// Parse tags
+		info := parseFieldTags(field)
+		if info.Skip {
+			continue
+		}
+
 		// Handle embedded structs (including pointer embeds like *gorm.Model)
 		if field.Anonymous {
 			ft := field.Type
@@ -63,12 +76,6 @@ func parseFieldsRecursive(t reflect.Type, config *IndexConfig, parentIndex []int
 			}
 			// Non-struct embedded types (e.g. custom string types) fall
 			// through to be treated as regular fields.
-		}
-
-		// Parse tags
-		info := parseFieldTags(field)
-		if info.Skip {
-			continue
 		}
 
 		config.FieldMapping[field.Name] = info
@@ -149,13 +156,15 @@ func parseFieldTags(field reflect.StructField) fieldInfo {
 
 	// Parse json tag for field name
 	if jsonTag := field.Tag.Get("json"); jsonTag != "" {
-		parts := strings.Split(jsonTag, ",")
-		if parts[0] == "-" {
+		name, _, hasOpts := strings.Cut(jsonTag, ",")
+		// Matching encoding/json: `json:"-"` drops the field, while
+		// `json:"-,"` names it "-".
+		if name == "-" && !hasOpts {
 			info.Skip = true
 			return info
 		}
-		if parts[0] != "" {
-			info.JSONName = parts[0]
+		if name != "" {
+			info.JSONName = name
 		}
 	}
 
@@ -188,8 +197,8 @@ func parseFieldTags(field reflect.StructField) fieldInfo {
 	return info
 }
 
-// toSnakeCase converts CamelCase to snake_case.
-// defaultNamingStrategy is efficient to reuse as it's stateless for standard usage.
+// defaultNamingStrategy is stateless for this use, so one shared instance is
+// enough.
 var defaultNamingStrategy = schema.NamingStrategy{}
 
 // toSnakeCase converts CamelCase to snake_case.

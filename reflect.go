@@ -1,6 +1,7 @@
 package gormsearch
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -27,14 +28,22 @@ func (gs *GormSearch) encodeDocument(model any, config *IndexConfig) (any, error
 			return gs.config.MapEncoder(model)
 		}
 	}
+
+	if v := reflectValue(model); !v.IsValid() || v.Kind() != reflect.Struct {
+		return nil, ErrInvalidModel
+	}
 	return gs.toDocument(model, config), nil
 }
 
 // toDocument converts a GORM model to a Meilisearch document using cached extractors.
 func (gs *GormSearch) toDocument(model any, config *IndexConfig) map[string]any {
-	v := reflectValue(model)
 	// Optimization: Pre-allocate map with capacity hint
 	doc := make(map[string]any, len(config.FieldExtractors))
+
+	v := reflectValue(model)
+	if !v.IsValid() || v.Kind() != reflect.Struct {
+		return doc
+	}
 
 	for _, extractor := range config.FieldExtractors {
 		// FieldByIndexErr safely handles nil embedded pointer structs
@@ -80,59 +89,89 @@ func toFloat(v reflect.Value) (float64, error) {
 	}
 }
 
-// extractID extracts the primary key value from a model using cached indices.
+// extractID returns the primary key of a model as a Meilisearch document id.
+// An empty string means the key could not be resolved (see idFromValue).
 func extractID(model any, config *IndexConfig) string {
-	v := reflectValue(model)
+	_, id := idFromValue(reflectValue(model), config)
+	return id
+}
 
-	// Optimization: Use cached field index if available
-	if len(config.IDFieldIndices) > 0 {
-		idField, err := v.FieldByIndexErr(config.IDFieldIndices)
+// idFromValue returns the primary key of a struct value both as its raw Go
+// value and as a string.
+//
+// The raw value is what SQL conditions must be built from: stringifying it
+// first breaks non-numeric keys, because GORM reads a non-numeric string
+// condition as raw SQL rather than as a primary key.
+//
+// A zero key yields "" so callers skip it. A zero key means the statement
+// identified its rows by condition rather than by value, and acting on it
+// would target the wrong document (id "0").
+func idFromValue(v reflect.Value, config *IndexConfig) (any, string) {
+	field := primaryKeyField(v, config)
+	if !field.IsValid() || field.IsZero() {
+		return nil, ""
+	}
+	return field.Interface(), valToString(field)
+}
+
+// primaryKeyField locates the primary key field, preferring the index path
+// cached at parse time and falling back to ID / Model.ID lookups.
+func primaryKeyField(v reflect.Value, config *IndexConfig) reflect.Value {
+	if !v.IsValid() || v.Kind() != reflect.Struct {
+		return reflect.Value{}
+	}
+
+	if config != nil && len(config.IDFieldIndices) > 0 {
+		// FieldByIndexErr safely handles nil embedded pointer structs
+		field, err := v.FieldByIndexErr(config.IDFieldIndices)
 		if err != nil {
-			return ""
+			return reflect.Value{}
 		}
-		return valToString(idField)
+		return field
 	}
 
 	// Fallback to legacy lookup (should rarely happen if parsed correctly)
-	idField := v.FieldByName("ID")
-	if !idField.IsValid() {
-		if modelField := v.FieldByName("Model"); modelField.IsValid() {
-			idField = modelField.FieldByName("ID")
-		}
+	if field := v.FieldByName("ID"); field.IsValid() {
+		return field
 	}
-
-	if !idField.IsValid() {
-		return ""
+	if model := v.FieldByName("Model"); model.IsValid() && model.Kind() == reflect.Struct {
+		return model.FieldByName("ID")
 	}
-
-	return valToString(idField)
+	return reflect.Value{}
 }
 
 // valToString converts a reflect.Value to its string representation.
-// Uses fast paths for common numeric and string types.
+// Switching on Kind rather than the concrete type keeps named key types
+// (type UserID uint64) on the allocation-free path.
 func valToString(v reflect.Value) string {
-	// Fast path for common types
-	switch id := v.Interface().(type) {
-	case uint:
-		return strconv.FormatUint(uint64(id), 10)
-	case uint64:
-		return strconv.FormatUint(id, 10)
-	case uint32:
-		return strconv.FormatUint(uint64(id), 10)
-	case int:
-		return strconv.FormatInt(int64(id), 10)
-	case int64:
-		return strconv.FormatInt(id, 10)
-	case string:
-		return id
+	for v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return ""
+		}
+		v = v.Elem()
+	}
+
+	switch v.Kind() {
+	case reflect.String:
+		return v.String()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(v.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(v.Uint(), 10)
+	case reflect.Invalid:
+		return ""
 	default:
-		return fmt.Sprintf("%v", id)
+		// Covers Stringer keys such as uuid.UUID.
+		return fmt.Sprint(v.Interface())
 	}
 }
 
 // isSoftDeleted checks if a model has been soft deleted (DeletedAt is set).
 func isSoftDeleted(model any, config *IndexConfig) bool {
 	v := reflectValue(model)
+	if !v.IsValid() || v.Kind() != reflect.Struct {
+		return false
+	}
 
 	// Optimization: Use cached field index if available
 	if config != nil && len(config.DeletedAtIndex) > 0 {
@@ -202,11 +241,76 @@ func reflectValue(v any) reflect.Value {
 
 // isMatchingModel checks if the model matches the registered config.
 func isMatchingModel(model any, config *IndexConfig) bool {
-	t := reflect.TypeOf(model)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
+	name := structTypeName(reflect.TypeOf(model))
+	return name != "" && name == config.ModelType
+}
+
+// structType returns the struct type t ultimately refers to, unwrapping
+// pointers and slices/arrays. Batch statements hand GORM a *[]Product, so the
+// element type is what identifies the registered model. Returns nil when there
+// is no struct underneath.
+func structType(t reflect.Type) reflect.Type {
+	for t != nil {
+		switch t.Kind() {
+		case reflect.Ptr, reflect.Slice, reflect.Array:
+			t = t.Elem()
+		case reflect.Struct:
+			return t
+		default:
+			return nil
+		}
 	}
-	return t.Name() == config.ModelType
+	return nil
+}
+
+// structTypeName returns the bare name of the struct t refers to, or "".
+func structTypeName(t reflect.Type) string {
+	if st := structType(t); st != nil {
+		return st.Name()
+	}
+	return ""
+}
+
+// typeKey returns the package-qualified name of the struct t refers to. It is
+// the registry key: the bare type name alone would let two models named
+// Product, from different packages, silently share one entry.
+func typeKey(t reflect.Type) string {
+	st := structType(t)
+	if st == nil || st.Name() == "" {
+		return ""
+	}
+	if pkg := st.PkgPath(); pkg != "" {
+		return pkg + "." + st.Name()
+	}
+	return st.Name()
+}
+
+// eachStructValue calls fn for every struct in model, which may be a struct, a
+// pointer to one, or a (pointer to a) slice or array of either. This is what
+// lets batch writes fan out to one job per record.
+func eachStructValue(model any, fn func(reflect.Value)) {
+	v := reflect.ValueOf(model)
+	for v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return
+		}
+		v = v.Elem()
+	}
+
+	switch v.Kind() {
+	case reflect.Struct:
+		fn(v)
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			elem := v.Index(i)
+			for elem.Kind() == reflect.Ptr && !elem.IsNil() {
+				elem = elem.Elem()
+			}
+			if elem.Kind() == reflect.Struct {
+				fn(elem)
+			}
+		}
+	}
 }
 
 // decodeDocument populates a struct from a map using cached field extractors.
@@ -218,16 +322,13 @@ func (gs *GormSearch) decodeDocument(doc map[string]any, dest any) error {
 	// Unpack pointer
 	v := reflect.ValueOf(dest)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
-		return fmt.Errorf("gormsearch: decode destination must be a non-nil pointer")
+		return ErrInvalidDest
 	}
 	v = v.Elem() // Now we have the struct
 
 	// Find config
 	// Optimization: Use registryByType for O(1) lookup
-	typeName := v.Type().Name()
-	gs.mu.RLock()
-	config := gs.registryByType[typeName]
-	gs.mu.RUnlock()
+	config := gs.configForType(v.Type())
 
 	if config == nil {
 		// If config not found, fallback to JSON (slower but safe)
@@ -361,4 +462,101 @@ func setFloat(field reflect.Value, val float64) {
 	case reflect.Float32, reflect.Float64:
 		field.SetFloat(val)
 	}
+}
+
+// configForType returns the registered config for a model type, if any.
+func (gs *GormSearch) configForType(t reflect.Type) *IndexConfig {
+	key := typeKey(t)
+	if key == "" {
+		return nil
+	}
+	gs.mu.RLock()
+	defer gs.mu.RUnlock()
+	return gs.registryByType[key]
+}
+
+// jsonDecoder returns the configured JSON decoder, defaulting to encoding/json.
+func (gs *GormSearch) jsonDecoder() func([]byte, any) error {
+	if gs.config != nil && gs.config.JSONDecoder != nil {
+		return gs.config.JSONDecoder
+	}
+	return json.Unmarshal
+}
+
+// jsonNull is compared against raw hit values to leave absent fields at their
+// zero value rather than writing an explicit null through.
+var jsonNull = []byte("null")
+
+// decodeRawDocument populates dest from a Meilisearch hit, decoding every field
+// straight from its raw JSON.
+//
+// Decoding from the raw bytes rather than from an intermediate map[string]any
+// is both faster and lossless: routing a document through `any` turns every
+// JSON number into a float64, which silently corrupts integers beyond 2^53
+// (Snowflake-style IDs, timestamps in nanoseconds), and forces complex fields
+// through an extra marshal/unmarshal round trip.
+func (gs *GormSearch) decodeRawDocument(hit map[string]json.RawMessage, dest any) error {
+	v := reflect.ValueOf(dest)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return ErrInvalidDest
+	}
+	v = v.Elem()
+
+	unmarshal := gs.jsonDecoder()
+
+	config := gs.configForType(v.Type())
+	if config == nil || v.Kind() != reflect.Struct {
+		// Unregistered type: fall back to encoding/json field matching.
+		data, err := json.Marshal(hit)
+		if err != nil {
+			return err
+		}
+		return unmarshal(data, dest)
+	}
+
+	for i := range config.FieldExtractors {
+		extractor := &config.FieldExtractors[i]
+
+		raw, ok := hit[extractor.JSONName]
+		if !ok || len(raw) == 0 || bytes.Equal(raw, jsonNull) {
+			continue
+		}
+
+		// FieldByIndexErr safely handles nil embedded pointer structs
+		field, err := v.FieldByIndexErr(extractor.FieldIndex)
+		if err != nil || !field.CanSet() {
+			continue
+		}
+
+		if extractor.IsGeo {
+			decodeGeoRaw(field, raw, extractor, unmarshal)
+			continue
+		}
+
+		// A document whose shape has drifted from the struct shouldn't fail
+		// the whole search, so per-field type mismatches are skipped.
+		_ = unmarshal(raw, field.Addr().Interface())
+	}
+
+	return nil
+}
+
+// decodeGeoRaw maps Meilisearch's nested _geo object back onto the flat
+// lat/lng fields of a geo struct.
+func decodeGeoRaw(field reflect.Value, raw []byte, extractor *FieldExtractor, unmarshal func([]byte, any) error) {
+	if field.Kind() != reflect.Struct ||
+		len(extractor.GeoLatIndex) == 0 || len(extractor.GeoLngIndex) == 0 {
+		return
+	}
+
+	var geo struct {
+		Lat float64 `json:"lat"`
+		Lng float64 `json:"lng"`
+	}
+	if err := unmarshal(raw, &geo); err != nil {
+		return
+	}
+
+	setFloat(field.FieldByIndex(extractor.GeoLatIndex), geo.Lat)
+	setFloat(field.FieldByIndex(extractor.GeoLngIndex), geo.Lng)
 }

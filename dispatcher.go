@@ -68,7 +68,7 @@ func (d *DefaultDispatcher) Dispatch(ctx context.Context, job Job) error {
 
 	go func() {
 		defer d.pool.release()
-		d.safeGo(ctx, job, func() error {
+		d.safeGo(job, func() error {
 			return d.retryWithContext(ctx, func() error {
 				return d.executeWithContext(ctx, job)
 			})
@@ -112,7 +112,7 @@ func (d *DefaultDispatcher) executeWithContext(ctx context.Context, job Job) err
 
 // safeGo executes a function with panic recovery, reporting errors via onError.
 // The caller is responsible for worker pool acquisition.
-func (d *DefaultDispatcher) safeGo(ctx context.Context, job Job, fn func() error) {
+func (d *DefaultDispatcher) safeGo(job Job, fn func() error) {
 	defer func() {
 		if r := recover(); r != nil && d.onError != nil {
 			d.onError(job.Operation, &panicError{value: r})
@@ -156,21 +156,25 @@ func (d *DefaultDispatcher) retryWithContext(ctx context.Context, fn func() erro
 		default:
 		}
 
-		if err := fn(); err != nil {
-			lastErr = err
-			// Exponential backoff: 100ms, 200ms, 400ms...
-			backoff := time.Duration(100*(1<<i)) * time.Millisecond
-
-			timer := time.NewTimer(backoff)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return lastErr
-			case <-timer.C:
-			}
-			continue
+		err := fn()
+		if err == nil {
+			return nil
 		}
-		return nil
+		lastErr = err
+
+		// No point backing off after the final attempt.
+		if i == maxRetries-1 {
+			break
+		}
+
+		// Exponential backoff: 100ms, 200ms, 400ms...
+		timer := time.NewTimer(time.Duration(100*(1<<i)) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return lastErr
+		case <-timer.C:
+		}
 	}
 	return lastErr
 }
@@ -202,7 +206,16 @@ type QueueDispatcher struct {
 
 // Dispatch marshals the job and publishes it.
 func (d *QueueDispatcher) Dispatch(ctx context.Context, job Job) error {
-	data, err := d.encoder(job)
+	if d.publish == nil {
+		return ErrNoPublisher
+	}
+
+	encode := d.encoder
+	if encode == nil {
+		encode = json.Marshal
+	}
+
+	data, err := encode(job)
 	if err != nil {
 		return err
 	}

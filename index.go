@@ -47,8 +47,9 @@ func (i *IndexRef) Search(query string, opts ...SearchOption) (*SearchResult, er
 	return i.gs.Search(i.indexName, query, opts...)
 }
 
-// MultiSearch performs multi-search starting from this index.
-// Additional indexes can be specified via SearchQuery structs.
+// MultiSearch runs several raw queries in one request. Each query names its own
+// index, so this index is not implied; it is a convenience shortcut for
+// GormSearch.MultiSearchRaw with this ref's context.
 func (i *IndexRef) MultiSearch(queries ...SearchQuery) (*MultiSearchResult, error) {
 	return i.gs.MultiSearchRaw(queries...)
 }

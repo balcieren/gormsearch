@@ -9,10 +9,21 @@ import (
 
 // Search performs a search query on the specified index.
 func (gs *GormSearch) Search(indexName, query string, opts ...SearchOption) (*SearchResult, error) {
-	ctx := gs.ctx
-	if ctx == nil {
-		ctx = context.Background()
+	resp, err := gs.searchResponse(indexName, query, opts...)
+	if err != nil {
+		return nil, err
 	}
+
+	result := newSearchResult(resp)
+	result.Hits = convertHits(resp.Hits)
+	return result, nil
+}
+
+// searchResponse runs the query and returns Meilisearch's raw response, so
+// typed callers can decode straight from the response bytes instead of paying
+// for the intermediate []map[string]any that Search builds.
+func (gs *GormSearch) searchResponse(indexName, query string, opts ...SearchOption) (*meilisearch.SearchResponse, error) {
+	ctx := gs.context()
 
 	if _, exists := gs.getConfig(indexName); !exists {
 		return nil, ErrIndexNotRegistered
@@ -32,6 +43,9 @@ func (gs *GormSearch) Search(indexName, query string, opts ...SearchOption) (*Se
 	}
 
 	options.Limit = clampLimit(options.Limit)
+	if options.Offset < 0 {
+		options.Offset = 0
+	}
 
 	req := &meilisearch.SearchRequest{
 		Limit:                   options.Limit,
@@ -51,27 +65,20 @@ func (gs *GormSearch) Search(indexName, query string, opts ...SearchOption) (*Se
 		Page:                    options.Page,
 		Distinct:                options.Distinct,
 		Filter:                  options.Filter,
+		Sort:                    options.Sort,
+		Facets:                  options.Facets,
 	}
 
 	if options.MatchingStrategy != "" {
 		req.MatchingStrategy = meilisearch.MatchingStrategy(options.MatchingStrategy)
 	}
 
-	if len(options.Sort) > 0 {
-		req.Sort = options.Sort
-	}
+	return gs.client.Index(indexName).SearchWithContext(ctx, query, req)
+}
 
-	if len(options.Facets) > 0 {
-		req.Facets = options.Facets
-	}
-
-	resp, err := gs.client.Index(indexName).SearchWithContext(ctx, query, req)
-	if err != nil {
-		return nil, err
-	}
-
+// newSearchResult copies the response metadata, leaving Hits to the caller.
+func newSearchResult(resp *meilisearch.SearchResponse) *SearchResult {
 	return &SearchResult{
-		Hits:              convertHits(resp.Hits),
 		Query:             resp.Query,
 		ProcessingTimeMs:  resp.ProcessingTimeMs,
 		Limit:             resp.Limit,
@@ -82,15 +89,21 @@ func (gs *GormSearch) Search(indexName, query string, opts ...SearchOption) (*Se
 		Page:              resp.Page,
 		TotalPages:        resp.TotalPages,
 		TotalHits:         resp.TotalHits,
-	}, nil
+	}
 }
 
 // MultiSearchRaw performs search across multiple indexes in a single request.
 func (gs *GormSearch) MultiSearchRaw(queries ...SearchQuery) (*MultiSearchResult, error) {
-	ctx := gs.ctx
-	if ctx == nil {
-		ctx = context.Background()
+	resp, err := gs.multiSearchResponse(queries...)
+	if err != nil {
+		return nil, err
 	}
+	return buildMultiSearchResult(resp, queries), nil
+}
+
+// multiSearchResponse issues the multi-search and returns the raw response.
+func (gs *GormSearch) multiSearchResponse(queries ...SearchQuery) (*meilisearch.MultiSearchResponse, error) {
+	ctx := gs.context()
 
 	if len(queries) == 0 {
 		return nil, ErrNoQueries
@@ -107,17 +120,16 @@ func (gs *GormSearch) MultiSearchRaw(queries ...SearchQuery) (*MultiSearchResult
 			return nil, ErrQueryTooLong
 		}
 
-		limit := q.Limit
-		if limit == 0 {
-			limit = DefaultLimit
+		offset := q.Offset
+		if offset < 0 {
+			offset = 0
 		}
-		limit = clampLimit(limit)
 
 		req := &meilisearch.SearchRequest{
 			IndexUID:                q.IndexName,
 			Query:                   q.Query,
-			Limit:                   limit,
-			Offset:                  q.Offset,
+			Limit:                   clampLimit(q.Limit),
+			Offset:                  offset,
 			Filter:                  q.Filter,
 			AttributesToRetrieve:    q.AttributesToRetrieve,
 			AttributesToSearchOn:    q.AttributesToSearchOn,
@@ -133,49 +145,38 @@ func (gs *GormSearch) MultiSearchRaw(queries ...SearchQuery) (*MultiSearchResult
 			HitsPerPage:             q.HitsPerPage,
 			Page:                    q.Page,
 			Distinct:                q.Distinct,
+			Sort:                    q.Sort,
+			Facets:                  q.Facets,
 		}
 
 		if q.MatchingStrategy != "" {
 			req.MatchingStrategy = meilisearch.MatchingStrategy(q.MatchingStrategy)
 		}
 
-		if len(q.Sort) > 0 {
-			req.Sort = q.Sort
-		}
-
 		searchRequests = append(searchRequests, req)
 	}
 
-	resp, err := gs.client.MultiSearchWithContext(ctx, &meilisearch.MultiSearchRequest{
+	return gs.client.MultiSearchWithContext(ctx, &meilisearch.MultiSearchRequest{
 		Queries: searchRequests,
 	})
-	if err != nil {
-		return nil, err
-	}
+}
 
+// buildMultiSearchResult converts a multi-search response, keying results by
+// the caller-supplied query keys.
+func buildMultiSearchResult(resp *meilisearch.MultiSearchResponse, queries []SearchQuery) *MultiSearchResult {
 	results := make([]SearchResult, 0, len(resp.Results))
-	byKey := make(map[string]SearchResult)
+	var byKey map[string]SearchResult
 
-	for i, r := range resp.Results {
-		sr := SearchResult{
-			Hits:              convertHits(r.Hits),
-			Query:             r.Query,
-			ProcessingTimeMs:  r.ProcessingTimeMs,
-			Limit:             r.Limit,
-			Offset:            r.Offset,
-			EstimatedTotal:    r.EstimatedTotalHits,
-			FacetDistribution: parseFacets(r.FacetDistribution),
-			HitsPerPage:       r.HitsPerPage,
-			Page:              r.Page,
-			TotalPages:        r.TotalPages,
-			TotalHits:         r.TotalHits,
-		}
+	for i := range resp.Results {
+		sr := *newSearchResult(&resp.Results[i])
+		sr.Hits = convertHits(resp.Results[i].Hits)
 		results = append(results, sr)
 
-		if i < len(queries) {
-			if key := queries[i].Key; key != "" {
-				byKey[key] = sr
+		if i < len(queries) && queries[i].Key != "" {
+			if byKey == nil {
+				byKey = make(map[string]SearchResult, len(queries))
 			}
+			byKey[queries[i].Key] = sr
 		}
 	}
 
@@ -183,7 +184,15 @@ func (gs *GormSearch) MultiSearchRaw(queries ...SearchQuery) (*MultiSearchResult
 		Results:          results,
 		ByKey:            byKey,
 		ProcessingTimeMs: resp.ProcessingTimeMs,
-	}, nil
+	}
+}
+
+// context returns the instance context, defaulting to Background.
+func (gs *GormSearch) context() context.Context {
+	if gs.ctx != nil {
+		return gs.ctx
+	}
+	return context.Background()
 }
 
 // clampLimit ensures limit is within valid range.

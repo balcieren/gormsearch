@@ -40,8 +40,7 @@ func TestBugFix_GeoDecodeRoundTrip(t *testing.T) {
 
 	config, err := parseModel(&GeoPlace{})
 	assert.NoError(t, err)
-	gs.registry[config.IndexName] = config
-	gs.registryByType[config.ModelType] = config
+	gs.storeConfig(config)
 
 	// Encode
 	original := &GeoPlace{
@@ -101,8 +100,7 @@ func TestBugFix_DecodeComplexFields(t *testing.T) {
 
 	config, err := parseModel(&ComplexModel{})
 	assert.NoError(t, err)
-	gs.registry[config.IndexName] = config
-	gs.registryByType[config.ModelType] = config
+	gs.storeConfig(config)
 
 	doc := map[string]any{
 		"id":     float64(1),
@@ -196,8 +194,7 @@ func TestBugFix_MultiSearchWithIndexPrefix(t *testing.T) {
 	config, err := parseModel(&PrefixProduct{})
 	assert.NoError(t, err)
 	config.IndexName = "prod_" + config.IndexName // What Register() does
-	gs.registry[config.IndexName] = config
-	gs.registryByType[config.ModelType] = config
+	gs.storeConfig(config)
 
 	var capturedReq *meilisearch.MultiSearchRequest
 	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).

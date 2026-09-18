@@ -32,6 +32,21 @@ var (
 	ErrIndexNotRegistered = errors.New("gormsearch: index not registered")
 	ErrQueryTooLong       = errors.New("gormsearch: query exceeds maximum length")
 	ErrNoQueries          = errors.New("gormsearch: no queries provided")
+	ErrInvalidModel       = errors.New("gormsearch: model is not a struct")
+	ErrInvalidDest        = errors.New("gormsearch: decode destination must be a non-nil pointer")
+	ErrNoPublisher        = errors.New("gormsearch: queue dispatcher has no publish function")
+
+	// ErrUnresolvedPrimaryKey is reported through OnError when a write cannot
+	// be synced because the statement identified its rows by condition and
+	// left the model's primary key zeroed, as in
+	// db.Model(&Product{}).Where(...).Update(...). Load the rows and save
+	// them, or call Sync, to index such changes.
+	ErrUnresolvedPrimaryKey = errors.New("gormsearch: primary key is unset; statement targets rows by condition")
+
+	// ErrDeleteFanoutTooLarge is reported through OnError when a conditional
+	// delete matches more rows than can be tracked for index removal. Run
+	// Sync, or delete in smaller batches, to reconcile the index.
+	ErrDeleteFanoutTooLarge = errors.New("gormsearch: too many rows matched to sync deletions")
 )
 
 // ============================================================================
@@ -95,6 +110,10 @@ type GormSearch struct {
 	registryByType map[string]*IndexConfig
 	mu             *sync.RWMutex
 	ctx            context.Context
+
+	// callbacksRegistered guards the one-time GORM callback installation.
+	// Guarded by mu.
+	callbacksRegistered bool
 }
 
 // Config holds the configuration options for GormSearch.
@@ -123,6 +142,12 @@ type IndexConfig struct {
 	SortableFields   []string
 	FieldMapping     map[string]fieldInfo
 	Model            any // Reference to the original model instance
+
+	// modelTypeKey is the package-qualified type name. It is the registry key,
+	// so that identically named models from different packages (billing.Invoice
+	// and crm.Invoice) do not overwrite each other.
+	modelTypeKey string
+
 	// Optimization fields
 	IDFieldIndices  []int            // Path to ID field (for nested structs)
 	DeletedAtIndex  []int            // Path to DeletedAt field (for soft delete check)
@@ -196,14 +221,16 @@ type SearchOptions struct {
 
 // SearchQuery represents a single query for MultiSearch.
 type SearchQuery struct {
-	IndexName               string
-	Query                   string
-	Limit                   int64
-	Offset                  int64
-	Filter                  any
-	Sort                    []string
-	Facets                  []string
-	IgnoreFields            []string // Deprecated? No, used in gorm but checking usage... let's stick to Meilisearch params
+	IndexName string
+	Query     string
+	Limit     int64
+	Offset    int64
+	Filter    any
+	Sort      []string
+	Facets    []string
+	// Deprecated: IgnoreFields is unused and has no effect. Use
+	// AttributesToRetrieve to control which fields come back.
+	IgnoreFields            []string
 	AttributesToRetrieve    []string
 	AttributesToSearchOn    []string
 	AttributesToCrop        []string

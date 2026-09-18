@@ -104,25 +104,27 @@ func SearchFor[T any](gs *GormSearch, query string, opts ...SearchOption) (*Type
 	}
 
 	// 2. Perform search
-	result, err := gs.Search(indexName, query, opts...)
+	resp, err := gs.searchResponse(indexName, query, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. Decode results
+	// 3. Decode results. Only the custom-decoder path needs the hits
+	// materialized as maps; the default path reads the response bytes directly.
 	var hits []T
 	if gs.config != nil && gs.config.MapDecoder != nil {
-		if err := gs.config.MapDecoder(result.Hits, &hits); err != nil {
+		if err := gs.config.MapDecoder(convertHits(resp.Hits), &hits); err != nil {
 			return nil, err
 		}
 	} else {
-		hits, err = decodeHitsWithInstance[T](gs, result.Hits)
+		hits, err = decodeRawHits[T](gs, resp.Hits)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	// 4. Return typed results with metadata
+	result := newSearchResult(resp)
 	return &TypedSearchResult[T]{
 		Hits:              hits,
 		Query:             result.Query,
@@ -184,16 +186,8 @@ func indexNameForGS[T any](gs *GormSearch) string {
 	if t == nil {
 		t = reflect.TypeOf(&zero).Elem()
 	}
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
 
-	typeName := t.Name()
-	gs.mu.RLock()
-	config := gs.registryByType[typeName]
-	gs.mu.RUnlock()
-
-	if config != nil {
+	if config := gs.configForType(t); config != nil {
 		return config.IndexName // Already has prefix
 	}
 
@@ -224,8 +218,8 @@ func DecodeInto[T any](hits meilisearch.Hits) ([]T, error) {
 }
 
 // decodeHits decodes using JSON roundtrip (Legacy/Fallback).
-// Note: This is now only used if GormSearch instance is not available.
-// Ideally, use decodeHitsWithInstance for better performance.
+// Note: This is only used when no GormSearch instance is available.
+// decodeRawHits is faster and lossless where an instance can be passed.
 func decodeHits[T any](hits []map[string]any) ([]T, error) {
 	result := make([]T, 0, len(hits))
 	for _, hit := range hits {
@@ -242,13 +236,13 @@ func decodeHits[T any](hits []map[string]any) ([]T, error) {
 	return result, nil
 }
 
-// decodeHitsWithInstance uses the optimized reflection decoder if available.
-func decodeHitsWithInstance[T any](gs *GormSearch, hits []map[string]any) ([]T, error) {
+// decodeRawHits decodes Meilisearch hits with the instance's field-index
+// decoder, straight from the response bytes.
+func decodeRawHits[T any](gs *GormSearch, hits meilisearch.Hits) ([]T, error) {
 	result := make([]T, 0, len(hits))
 	for _, hit := range hits {
 		var item T
-		// Use optimized decoder
-		if err := gs.decodeDocument(hit, &item); err != nil {
+		if err := gs.decodeRawDocument(hit, &item); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -265,7 +259,7 @@ type TypedQuery struct {
 	indexName     string
 	query         string
 	opts          SearchOptions
-	decodeDefault func(*GormSearch, []map[string]any) error
+	decodeDefault func(*GormSearch, meilisearch.Hits) error
 	decodeCustom  func([]map[string]any, MapDecoder) error
 }
 
@@ -306,9 +300,9 @@ func Query[T any](dest *[]T, query string, opts ...SearchOption) TypedQuery {
 		indexName: indexNameFor[T](),
 		query:     query,
 		opts:      options,
-		decodeDefault: func(gs *GormSearch, hits []map[string]any) error {
+		decodeDefault: func(gs *GormSearch, hits meilisearch.Hits) error {
 			// Use optimized decoder that needs GS instance
-			items, err := decodeHitsWithInstance[T](gs, hits)
+			items, err := decodeRawHits[T](gs, hits)
 			if err != nil {
 				return err
 			}
@@ -337,8 +331,8 @@ func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption)
 		indexName: indexName,
 		query:     query,
 		opts:      options,
-		decodeDefault: func(gs *GormSearch, hits []map[string]any) error {
-			items, err := decodeHitsWithInstance[T](gs, hits)
+		decodeDefault: func(gs *GormSearch, hits meilisearch.Hits) error {
+			items, err := decodeRawHits[T](gs, hits)
 			if err != nil {
 				return err
 			}
@@ -369,7 +363,7 @@ func QueryIndex[T any](dest *[]T, indexName, query string, opts ...SearchOption)
 //	fmt.Println("Total Products:", results.Results[0].EstimatedTotal)
 func (gs *GormSearch) MultiSearch(queries ...TypedQuery) (*MultiSearchResult, error) {
 	if len(queries) == 0 {
-		return nil, nil
+		return nil, ErrNoQueries
 	}
 
 	// Build search queries
@@ -403,27 +397,28 @@ func (gs *GormSearch) MultiSearch(queries ...TypedQuery) (*MultiSearchResult, er
 	}
 
 	// Execute multi-search (single HTTP request)
-	results, err := gs.MultiSearchRaw(searchQueries...)
+	resp, err := gs.multiSearchResponse(searchQueries...)
 	if err != nil {
 		return nil, err
 	}
+	results := buildMultiSearchResult(resp, searchQueries)
 
 	// Decode each result using pre-built closures (no reflection)
 	for i, q := range queries {
-		if i >= len(results.Results) {
+		if i >= len(resp.Results) {
 			break
 		}
-		r := results.Results[i]
 
 		if gs.config != nil && gs.config.MapDecoder != nil {
-			if err := q.decodeCustom(r.Hits, gs.config.MapDecoder); err != nil {
+			if err := q.decodeCustom(results.Results[i].Hits, gs.config.MapDecoder); err != nil {
 				return nil, err
 			}
-		} else {
-			// Optimized path: Use reflection decoder via closure
-			if err := q.decodeDefault(gs, r.Hits); err != nil {
-				return nil, err
-			}
+			continue
+		}
+
+		// Optimized path: decode from the raw response via closure
+		if err := q.decodeDefault(gs, resp.Results[i].Hits); err != nil {
+			return nil, err
 		}
 	}
 

@@ -1,8 +1,11 @@
 package gormsearch
 
 import (
+	"encoding/json"
+	"sync"
 	"testing"
 
+	"github.com/meilisearch/meilisearch-go"
 	"gorm.io/gorm"
 )
 
@@ -54,11 +57,12 @@ func BenchmarkExtractID(b *testing.B) {
 		Model: gorm.Model{ID: 12345},
 	}
 
-	// Setup config with cached indices
-	config := &IndexConfig{
-		IDFieldIndices: []int{0}, // ID is the first field in gorm.Model
-	}
+	// ID sits at index {0, 0}: field 0 of the embedded gorm.Model. Parse the
+	// model rather than hand-writing the path, so this measures key extraction
+	// instead of formatting a whole struct.
+	config, _ := parseModel(model)
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		extractID(model, config)
@@ -122,5 +126,64 @@ func BenchmarkIsSoftDeleted(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		isSoftDeleted(model, config)
+	}
+}
+
+// benchHits is a representative Meilisearch response body for decode benchmarks.
+var benchHits = func() meilisearch.Hits {
+	hits := make(meilisearch.Hits, 0, 20)
+	for i := 0; i < 20; i++ {
+		hits = append(hits, meilisearch.Hit{
+			"id":          json.RawMessage(`1`),
+			"name":        json.RawMessage(`"Test Product"`),
+			"description": json.RawMessage(`"A test product description"`),
+			"price":       json.RawMessage(`99.99`),
+			"category":    json.RawMessage(`"electronics"`),
+			"created_at":  json.RawMessage(`"2024-01-01T00:00:00Z"`),
+		})
+	}
+	return hits
+}()
+
+func benchDecodeGS() *GormSearch {
+	gs := &GormSearch{
+		config:         &Config{},
+		registry:       make(map[string]*IndexConfig),
+		registryByType: make(map[string]*IndexConfig),
+		mu:             &sync.RWMutex{},
+	}
+	config, _ := parseModel(&BenchProduct{})
+	gs.storeConfig(config)
+	return gs
+}
+
+// BenchmarkDecodeHits_Raw decodes straight from the response bytes.
+func BenchmarkDecodeHits_Raw(b *testing.B) {
+	gs := benchDecodeGS()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := decodeRawHits[BenchProduct](gs, benchHits); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkDecodeHits_ViaMaps decodes through the intermediate
+// []map[string]any, the shape typed search used to go through.
+func BenchmarkDecodeHits_ViaMaps(b *testing.B) {
+	gs := benchDecodeGS()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		hits := convertHits(benchHits)
+		for _, hit := range hits {
+			var item BenchProduct
+			if err := gs.decodeDocument(hit, &item); err != nil {
+				b.Fatal(err)
+			}
+		}
 	}
 }

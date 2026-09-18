@@ -328,7 +328,7 @@ func TestDispatcher_PanicRecovery(t *testing.T) {
 	// Execute safeGo with a panicking function
 	done := make(chan struct{})
 	go func() {
-		dispatcher.safeGo(context.Background(), job, func() error {
+		dispatcher.safeGo(job, func() error {
 			panic("test panic")
 		})
 		close(done)
@@ -371,11 +371,8 @@ func TestIntegration_CreateUpdateDelete(t *testing.T) {
 
 	// Register model and callbacks
 	config, _ := parseModel(&SyncTestProduct{})
-	gs.mu.Lock()
-	gs.registry[config.IndexName] = config
-	gs.registryByType[config.ModelType] = config
-	gs.mu.Unlock()
-	gs.registerCallbacks(config)
+	gs.storeConfig(config)
+	gs.registerCallbacks()
 
 	// Create
 	product := &SyncTestProduct{Name: "Test Product", Price: 100}
@@ -434,11 +431,8 @@ func TestIntegration_SoftDeleteTriggersSearchDelete(t *testing.T) {
 	}
 
 	config, _ := parseModel(&SyncTestProduct{})
-	gs.mu.Lock()
-	gs.registry[config.IndexName] = config
-	gs.registryByType[config.ModelType] = config
-	gs.mu.Unlock()
-	gs.registerCallbacks(config)
+	gs.storeConfig(config)
+	gs.registerCallbacks()
 
 	// Create product
 	product := &SyncTestProduct{Name: "Test", Price: 100}
@@ -488,11 +482,8 @@ func TestIntegration_BatchOperations(t *testing.T) {
 	}
 
 	config, _ := parseModel(&SyncTestProduct{})
-	gs.mu.Lock()
-	gs.registry[config.IndexName] = config
-	gs.registryByType[config.ModelType] = config
-	gs.mu.Unlock()
-	gs.registerCallbacks(config)
+	gs.storeConfig(config)
+	gs.registerCallbacks()
 
 	// Create multiple products
 	products := []SyncTestProduct{
