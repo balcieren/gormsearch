@@ -558,7 +558,7 @@ func TestSearcherIndex_Coverage(t *testing.T) {
 	gs.registry["custom_index"] = &IndexConfig{IndexName: "custom_index"}
 
 	mockClient.On("Index", "custom_index").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "test", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "test", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: []meilisearch.Hit{},
 	}, nil)
 
@@ -581,7 +581,7 @@ func TestSearchAs(t *testing.T) {
 	gs.registry["coverage_test"] = &IndexConfig{IndexName: "coverage_test"}
 
 	mockClient.On("Index", "coverage_test").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "test", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "test", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: []meilisearch.Hit{},
 	}, nil)
 
@@ -604,7 +604,7 @@ func TestMultiSearch(t *testing.T) {
 	}
 	gs.registry["coverage_test"] = &IndexConfig{IndexName: "coverage_test"}
 
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
+	mockClient.On("MultiSearch", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
 		Results: []meilisearch.SearchResponse{
 			{Hits: []meilisearch.Hit{
 				{"id": json.RawMessage(`1`), "name": json.RawMessage(`"Test"`)},
@@ -681,7 +681,7 @@ func TestExecuteWithContext_Create(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "execute_test").Return(mockIndex)
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -701,7 +701,7 @@ func TestExecuteWithContext_Update(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "execute_test").Return(mockIndex)
-	mockIndex.On("UpdateDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
+	mockIndex.On("UpdateDocuments", mock.Anything, mock.Anything, mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
 
 	ctx := context.Background()
 	job := Job{
@@ -719,7 +719,7 @@ func TestExecuteWithContext_Delete(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "execute_test").Return(mockIndex)
-	mockIndex.On("DeleteDocumentWithContext", mock.Anything, "1", mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
+	mockIndex.On("DeleteDocument", mock.Anything, "1", mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
 
 	ctx := context.Background()
 	job := Job{
@@ -766,7 +766,7 @@ func TestExecute_BackwardCompatible(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "execute_test").Return(mockIndex)
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
 
 	job := Job{
 		IndexName: "execute_test",
@@ -805,7 +805,7 @@ func TestSearchFor_WithOptions(t *testing.T) {
 	}
 
 	mockClient.On("Index", "coverage_test").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "test query", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "test query", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits:               hits,
 		EstimatedTotalHits: 1,
 	}, nil)
@@ -836,7 +836,7 @@ func TestSearchAs_WithCustomIndex(t *testing.T) {
 	}
 
 	mockClient.On("Index", "custom_idx").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "custom query", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "custom query", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits:               hits,
 		EstimatedTotalHits: 1,
 	}, nil)
@@ -868,7 +868,7 @@ func TestSearch_WithAllOptions(t *testing.T) {
 	hits := []meilisearch.Hit{}
 
 	mockClient.On("Index", "coverage_test").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "comprehensive", mock.MatchedBy(func(req *meilisearch.SearchRequest) bool {
+	mockIndex.On("Search", mock.Anything, "comprehensive", mock.MatchedBy(func(req *meilisearch.SearchRequest) bool {
 		return req.Limit == 20 && req.Offset == 10
 	})).Return(&meilisearch.SearchResponse{
 		Hits:               hits,
@@ -908,7 +908,7 @@ func TestSearch_WithFacetDistribution(t *testing.T) {
 	}
 
 	mockClient.On("Index", "coverage_test").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "facet test", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "facet test", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits:              hits,
 		FacetDistribution: json.RawMessage(`{"category": {"books": 10, "games": 5}}`),
 	}, nil)
@@ -1037,7 +1037,7 @@ func TestDispatch_WithDefaultDispatcher(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "test_index").Return(mockIndex)
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
 
 	dispatcher := NewDefaultDispatcher(mockClient, 10, 3, nil)
 	job := Job{
@@ -1062,7 +1062,7 @@ func TestExecute_CreateError(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "execute_test").Return(mockIndex)
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("create failed"))
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("create failed"))
 
 	job := Job{
 		IndexName: "execute_test",
@@ -1080,7 +1080,7 @@ func TestExecute_UpdateError(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "execute_test").Return(mockIndex)
-	mockIndex.On("UpdateDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("update failed"))
+	mockIndex.On("UpdateDocuments", mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("update failed"))
 
 	job := Job{
 		IndexName: "execute_test",
@@ -1098,7 +1098,7 @@ func TestExecute_DeleteError(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "execute_test").Return(mockIndex)
-	mockIndex.On("DeleteDocumentWithContext", mock.Anything, "1", mock.Anything).Return(nil, errors.New("delete failed"))
+	mockIndex.On("DeleteDocument", mock.Anything, "1", mock.Anything).Return(nil, errors.New("delete failed"))
 
 	job := Job{
 		IndexName: "execute_test",
@@ -1371,9 +1371,9 @@ func TestDefaultDispatcher_RetryOnError(t *testing.T) {
 
 	mockClient.On("Index", "retry_test").Return(mockIndex)
 	// First two calls fail, third succeeds
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, errors.New("temp error")).Times(2)
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Return(&meilisearch.TaskInfo{TaskUID: 1}, nil).Once()
 
 	dispatcher := NewDefaultDispatcher(mockClient, 10, 3, onError)
@@ -1540,7 +1540,7 @@ func TestMultiSearchRaw_WithQueries(t *testing.T) {
 	}
 	gs.registry["test_index"] = &IndexConfig{IndexName: "test_index"}
 
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
+	mockClient.On("MultiSearch", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
 		Results: []meilisearch.SearchResponse{
 			{Hits: []meilisearch.Hit{}, EstimatedTotalHits: 0},
 		},
@@ -1666,7 +1666,7 @@ func TestMultiSearch_WithCustomDecoder(t *testing.T) {
 	}
 	gs.registry["coverage_test"] = &IndexConfig{IndexName: "coverage_test"}
 
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
+	mockClient.On("MultiSearch", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
 		Results: []meilisearch.SearchResponse{
 			{Hits: []meilisearch.Hit{{"id": json.RawMessage(`1`)}}, EstimatedTotalHits: 1},
 		},
@@ -1689,7 +1689,7 @@ func TestMultiSearch_Key(t *testing.T) {
 	}
 	gs.registry["coverage_test"] = &IndexConfig{IndexName: "coverage_test"}
 
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
+	mockClient.On("MultiSearch", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
 		Results: []meilisearch.SearchResponse{
 			{Hits: []meilisearch.Hit{{"id": json.RawMessage(`1`)}}, EstimatedTotalHits: 1},
 		},
@@ -1739,7 +1739,7 @@ func TestSearchAs_Error(t *testing.T) {
 	gs.registry["test_idx"] = &IndexConfig{IndexName: "test_idx"}
 
 	mockClient.On("Index", "test_idx").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "error query", mock.Anything).Return(nil, errors.New("search error"))
+	mockIndex.On("Search", mock.Anything, "error query", mock.Anything).Return(nil, errors.New("search error"))
 
 	_, err := SearchFor[CoverageTestModel](gs, "error query", WithIndexName("test_idx"))
 	assert.Error(t, err)
@@ -1757,7 +1757,7 @@ func TestMultiSearch_Error(t *testing.T) {
 	}
 	gs.registry["test_idx"] = &IndexConfig{IndexName: "test_idx"}
 
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(nil, errors.New("multi search error"))
+	mockClient.On("MultiSearch", mock.Anything, mock.Anything).Return(nil, errors.New("multi search error"))
 
 	var results []CoverageTestModel
 	_, err := gs.MultiSearch(QueryIndex(&results, "test_idx", "test"))
@@ -1862,7 +1862,7 @@ func TestDefaultDispatcher_AllRetriesFail(t *testing.T) {
 
 	mockClient.On("Index", "fail_test").Return(mockIndex)
 	// All retries fail
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, errors.New("persistent error"))
 
 	dispatcher := NewDefaultDispatcher(mockClient, 10, 2, onError) // Only 2 retries
@@ -1885,7 +1885,7 @@ func TestDefaultDispatcher_ZeroRetries(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "zero_retry").Return(mockIndex)
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
 
 	// Zero maxRetries should use default (3)
@@ -1908,7 +1908,7 @@ func TestDispatch_UpdateOperation(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "update_test").Return(mockIndex)
-	mockIndex.On("UpdateDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("UpdateDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
 
 	dispatcher := NewDefaultDispatcher(mockClient, 10, 3, nil)
@@ -1929,7 +1929,7 @@ func TestDispatch_DeleteOperation(t *testing.T) {
 	mockIndex := new(MockIndex)
 
 	mockClient.On("Index", "delete_test").Return(mockIndex)
-	mockIndex.On("DeleteDocumentWithContext", mock.Anything, "123", mock.Anything).
+	mockIndex.On("DeleteDocument", mock.Anything, "123", mock.Anything).
 		Return(&meilisearch.TaskInfo{TaskUID: 1}, nil)
 
 	dispatcher := NewDefaultDispatcher(mockClient, 10, 3, nil)
@@ -1965,7 +1965,7 @@ func TestQueryIndex_WithDecodeDefault(t *testing.T) {
 		{"id": json.RawMessage(`1`), "name": json.RawMessage(`"Item"`)},
 	}
 
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
+	mockClient.On("MultiSearch", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
 		Results: []meilisearch.SearchResponse{
 			{Hits: hits, EstimatedTotalHits: 1},
 		},
@@ -1995,7 +1995,7 @@ func TestSafeGo_PanicRecovery(t *testing.T) {
 
 	mockClient.On("Index", "panic_test").Return(mockIndex)
 	// This will cause a panic in executeWithContext
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			panic("intentional panic")
 		}).Return(nil, nil)
@@ -2178,7 +2178,7 @@ func TestMultiSearch_WithMapDecoder(t *testing.T) {
 		{"id": json.RawMessage(`1`), "name": json.RawMessage(`"Custom"`)},
 	}
 
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
+	mockClient.On("MultiSearch", mock.Anything, mock.Anything).Return(&meilisearch.MultiSearchResponse{
 		Results: []meilisearch.SearchResponse{
 			{Hits: hits, EstimatedTotalHits: 1},
 		},
@@ -2299,7 +2299,7 @@ func TestRetryWithContext_MaxRetriesExhausted_Direct(t *testing.T) {
 
 	var callCount int32
 	mockClient.On("Index", "retry_exhaust_test").Return(mockIndex)
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			atomic.AddInt32(&callCount, 1)
 		}).Return(nil, errors.New("persistent error"))
@@ -2337,7 +2337,7 @@ func TestRetryWithContext_SuccessAfterRetry(t *testing.T) {
 	mockClient.On("Index", "retry_success_test").Return(mockIndex)
 
 	// First call fails, second succeeds
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Return(func(ctx context.Context, docs any, opts *string) *meilisearch.TaskInfo {
 			callCount++
 			if callCount >= 2 {
@@ -2385,7 +2385,7 @@ func TestSearchFor_WithGormSearch(t *testing.T) {
 
 	// Prepare mock response
 	mockClient.On("Index", "search_test_idx").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "query", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "query", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: []meilisearch.Hit{
 			{"id": json.RawMessage(`1`), "name": json.RawMessage(`"Test"`)},
 		},
@@ -2413,7 +2413,7 @@ func TestMultiSearchAs_ErrorPath(t *testing.T) {
 		config:   &Config{},
 	}
 
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).Return(nil, errors.New("search error"))
+	mockClient.On("MultiSearch", mock.Anything, mock.Anything).Return(nil, errors.New("search error"))
 
 	var results []CoverageTestModel
 	tq := Query(&results, "test")

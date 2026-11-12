@@ -22,7 +22,7 @@ func (m *MockClient) Index(uid string) meilisearch.IndexManager {
 	return args.Get(0).(meilisearch.IndexManager)
 }
 
-func (m *MockClient) MultiSearchWithContext(ctx context.Context, request *meilisearch.MultiSearchRequest) (*meilisearch.MultiSearchResponse, error) {
+func (m *MockClient) MultiSearch(ctx context.Context, request *meilisearch.MultiSearchRequest) (*meilisearch.MultiSearchResponse, error) {
 	args := m.Called(ctx, request)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -30,7 +30,7 @@ func (m *MockClient) MultiSearchWithContext(ctx context.Context, request *meilis
 	return args.Get(0).(*meilisearch.MultiSearchResponse), args.Error(1)
 }
 
-func (m *MockClient) CreateIndex(config *meilisearch.IndexConfig) (*meilisearch.TaskInfo, error) {
+func (m *MockClient) CreateIndex(_ context.Context, config *meilisearch.IndexConfig) (*meilisearch.TaskInfo, error) {
 	args := m.Called(config)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -44,7 +44,7 @@ type MockIndex struct {
 	meilisearch.IndexManager // Embed interface
 }
 
-func (m *MockIndex) SearchWithContext(ctx context.Context, query string, request *meilisearch.SearchRequest) (*meilisearch.SearchResponse, error) {
+func (m *MockIndex) Search(ctx context.Context, query string, request *meilisearch.SearchRequest) (*meilisearch.SearchResponse, error) {
 	args := m.Called(ctx, query, request)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -52,7 +52,7 @@ func (m *MockIndex) SearchWithContext(ctx context.Context, query string, request
 	return args.Get(0).(*meilisearch.SearchResponse), args.Error(1)
 }
 
-func (m *MockIndex) UpdateSettings(settings *meilisearch.Settings) (*meilisearch.TaskInfo, error) {
+func (m *MockIndex) UpdateSettings(_ context.Context, settings *meilisearch.Settings) (*meilisearch.TaskInfo, error) {
 	args := m.Called(settings)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -60,7 +60,7 @@ func (m *MockIndex) UpdateSettings(settings *meilisearch.Settings) (*meilisearch
 	return args.Get(0).(*meilisearch.TaskInfo), args.Error(1)
 }
 
-func (m *MockIndex) AddDocumentsWithContext(ctx context.Context, documents any, opts *meilisearch.DocumentOptions) (*meilisearch.TaskInfo, error) {
+func (m *MockIndex) AddDocuments(ctx context.Context, documents any, opts *meilisearch.DocumentOptions) (*meilisearch.TaskInfo, error) {
 	args := m.Called(ctx, documents, opts)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -68,7 +68,7 @@ func (m *MockIndex) AddDocumentsWithContext(ctx context.Context, documents any, 
 	return args.Get(0).(*meilisearch.TaskInfo), args.Error(1)
 }
 
-func (m *MockIndex) UpdateDocumentsWithContext(ctx context.Context, documents any, opts *meilisearch.DocumentOptions) (*meilisearch.TaskInfo, error) {
+func (m *MockIndex) UpdateDocuments(ctx context.Context, documents any, opts *meilisearch.DocumentOptions) (*meilisearch.TaskInfo, error) {
 	args := m.Called(ctx, documents, opts)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -76,7 +76,7 @@ func (m *MockIndex) UpdateDocumentsWithContext(ctx context.Context, documents an
 	return args.Get(0).(*meilisearch.TaskInfo), args.Error(1)
 }
 
-func (m *MockIndex) DeleteDocumentWithContext(ctx context.Context, id string, options *meilisearch.DocumentOptions) (*meilisearch.TaskInfo, error) {
+func (m *MockIndex) DeleteDocument(ctx context.Context, id string, options *meilisearch.DocumentOptions) (*meilisearch.TaskInfo, error) {
 	args := m.Called(ctx, id, options)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
@@ -124,7 +124,7 @@ func TestSearchFor(t *testing.T) {
 		},
 	}
 
-	mockIndex.On("SearchWithContext", mock.Anything, "laptop", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "laptop", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: hits1,
 	}, nil)
 
@@ -177,7 +177,7 @@ func TestFluentMultiSearch(t *testing.T) {
 		},
 	}
 
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.MatchedBy(func(req *meilisearch.MultiSearchRequest) bool {
+	mockClient.On("MultiSearch", mock.Anything, mock.MatchedBy(func(req *meilisearch.MultiSearchRequest) bool {
 		return len(req.Queries) == 2 &&
 			req.Queries[0].IndexUID == "products" &&
 			req.Queries[1].IndexUID == "categories"
@@ -225,7 +225,7 @@ func TestOfSearcher(t *testing.T) {
 		},
 	}
 
-	mockIndex.On("SearchWithContext", mock.Anything, "test", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "test", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: hits,
 	}, nil)
 
@@ -259,7 +259,7 @@ func TestSearcherIndex(t *testing.T) {
 		},
 	}
 
-	mockIndex.On("SearchWithContext", mock.Anything, "old", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "old", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: hits,
 	}, nil)
 
@@ -293,7 +293,7 @@ func TestIndexRef(t *testing.T) {
 		},
 	}
 
-	mockIndex.On("SearchWithContext", mock.Anything, "macbook", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "macbook", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: hits,
 	}, nil)
 
@@ -326,7 +326,7 @@ func TestIndexRefWithContext(t *testing.T) {
 		},
 	}
 
-	mockIndex.On("SearchWithContext", mock.Anything, "test", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "test", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: hits,
 	}, nil)
 

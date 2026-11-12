@@ -85,7 +85,7 @@ func TestWithCustomDecoder(t *testing.T) {
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}
 
 	mockClient.On("Index", "products").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "query", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "query", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: []meilisearch.Hit{{"id": json.RawMessage(`1`)}},
 	}, nil)
 
@@ -117,7 +117,7 @@ func TestWithCustomDecoderError(t *testing.T) {
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}
 
 	mockClient.On("Index", "products").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "query", mock.Anything).Return(&meilisearch.SearchResponse{
+	mockIndex.On("Search", mock.Anything, "query", mock.Anything).Return(&meilisearch.SearchResponse{
 		Hits: []meilisearch.Hit{{"id": json.RawMessage(`1`)}},
 	}, nil)
 

@@ -197,7 +197,7 @@ func TestBugFix_MultiSearchWithIndexPrefix(t *testing.T) {
 	gs.storeConfig(config)
 
 	var capturedReq *meilisearch.MultiSearchRequest
-	mockClient.On("MultiSearchWithContext", mock.Anything, mock.Anything).
+	mockClient.On("MultiSearch", mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			capturedReq = args.Get(1).(*meilisearch.MultiSearchRequest)
 		}).
@@ -247,7 +247,7 @@ func TestBugFix_SyncDispatchExecutesInline(t *testing.T) {
 
 	mockClient.On("Index", "sync_idx").Return(mockIndex)
 	var called int32
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			atomic.StoreInt32(&called, 1)
 		}).
@@ -265,7 +265,7 @@ func TestBugFix_SyncDispatchExecutesInline(t *testing.T) {
 	// Sync mode must surface errors to the caller
 	errIdx := new(MockIndex)
 	mockClient.On("Index", "err_idx").Return(errIdx)
-	errIdx.On("DeleteDocumentWithContext", mock.Anything, mock.Anything, mock.Anything).
+	errIdx.On("DeleteDocument", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil, assert.AnError)
 
 	err = dispatcher.Dispatch(context.Background(), Job{IndexName: "err_idx", Operation: "delete", ID: "1"})
@@ -308,7 +308,7 @@ func TestBugFix_SearcherSearchDoesNotMutateOpts(t *testing.T) {
 	gs.registry["products"] = &IndexConfig{IndexName: "products"}
 
 	mockClient.On("Index", "products").Return(mockIndex)
-	mockIndex.On("SearchWithContext", mock.Anything, "q", mock.Anything).
+	mockIndex.On("Search", mock.Anything, "q", mock.Anything).
 		Return(&meilisearch.SearchResponse{}, nil)
 
 	searcher := Of[GenericTestProduct](gs)
@@ -340,7 +340,7 @@ func TestBugFix_DispatcherBackpressure(t *testing.T) {
 
 	release := make(chan struct{})
 	mockClient.On("Index", "bp_idx").Return(mockIndex)
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			<-release // Block until the test releases the worker
 		}).
@@ -389,7 +389,7 @@ func TestBugFix_DispatcherBackpressureRespectsContext(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	mockClient.On("Index", "bp_ctx").Return(mockIndex)
-	mockIndex.On("AddDocumentsWithContext", mock.Anything, mock.Anything, mock.Anything).
+	mockIndex.On("AddDocuments", mock.Anything, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
 			<-release
 		}).

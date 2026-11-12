@@ -371,7 +371,7 @@ func newSearchMock(t *testing.T, model any, hits meilisearch.Hits, opts ...Optio
 	client := new(MockClient)
 	index := new(MockIndex)
 	client.On("Index", mock.Anything).Return(index)
-	index.On("SearchWithContext", mock.Anything, mock.Anything, mock.Anything).
+	index.On("Search", mock.Anything, mock.Anything, mock.Anything).
 		Return(&meilisearch.SearchResponse{Hits: hits}, nil)
 
 	config := &Config{}

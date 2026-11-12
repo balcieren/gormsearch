@@ -88,13 +88,13 @@ func ExecuteWithContext(ctx context.Context, client meilisearch.ServiceManager, 
 
 	switch job.Operation {
 	case "create":
-		_, err := index.AddDocumentsWithContext(ctx, []any{job.Document}, nil)
+		_, err := index.AddDocuments(ctx, []any{job.Document}, nil)
 		return err
 	case "update":
-		_, err := index.UpdateDocumentsWithContext(ctx, []any{job.Document}, nil)
+		_, err := index.UpdateDocuments(ctx, []any{job.Document}, nil)
 		return err
 	case "delete":
-		_, err := index.DeleteDocumentWithContext(ctx, job.ID, nil)
+		_, err := index.DeleteDocument(ctx, job.ID, nil)
 		return err
 	}
 	return nil

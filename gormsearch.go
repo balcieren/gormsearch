@@ -122,14 +122,14 @@ func (gs *GormSearch) configureIndex(config *IndexConfig) error {
 	index := gs.client.Index(config.IndexName)
 
 	// Create or update index
-	_, err := gs.client.CreateIndex(&meilisearch.IndexConfig{
+	_, err := gs.client.CreateIndex(gs.context(), &meilisearch.IndexConfig{
 		Uid:        config.IndexName,
 		PrimaryKey: config.PrimaryKey,
 	})
 	if err != nil {
 		// Only ignore "index already exists" errors
 		var meiliErr *meilisearch.Error
-		if !errors.As(err, &meiliErr) || meiliErr.MeilisearchApiError.Code != "index_already_exists" {
+		if !errors.As(err, &meiliErr) || meiliErr.APIError.Code != meilisearch.APIErrCodeIndexAlreadyExists {
 			return err
 		}
 	}
@@ -138,7 +138,7 @@ func (gs *GormSearch) configureIndex(config *IndexConfig) error {
 
 	// Update settings if any attribute is set
 	if hasSettings(settings) {
-		if _, err := index.UpdateSettings(settings); err != nil {
+		if _, err := index.UpdateSettings(gs.context(), settings); err != nil {
 			return err
 		}
 	}
@@ -262,7 +262,7 @@ func (gs *GormSearch) Sync(model any) error {
 		}
 
 		if len(documents) > 0 {
-			if _, err := index.AddDocumentsWithContext(ctx, documents, opts); err != nil {
+			if _, err := index.AddDocuments(ctx, documents, opts); err != nil {
 				return err
 			}
 		}

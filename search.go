@@ -61,7 +61,7 @@ func (gs *GormSearch) searchResponse(indexName, query string, opts ...SearchOpti
 		ShowMatchesPosition:     options.ShowMatchesPosition,
 		ShowRankingScore:        options.ShowRankingScore,
 		ShowRankingScoreDetails: options.ShowRankingScoreDetails,
-		HitsPerPage:             options.HitsPerPage,
+		HitsPerPage:             hitsPerPage(options.HitsPerPage),
 		Page:                    options.Page,
 		Distinct:                options.Distinct,
 		Filter:                  options.Filter,
@@ -73,7 +73,7 @@ func (gs *GormSearch) searchResponse(indexName, query string, opts ...SearchOpti
 		req.MatchingStrategy = meilisearch.MatchingStrategy(options.MatchingStrategy)
 	}
 
-	return gs.client.Index(indexName).SearchWithContext(ctx, query, req)
+	return gs.client.Index(indexName).Search(ctx, query, req)
 }
 
 // newSearchResult copies the response metadata, leaving Hits to the caller.
@@ -142,7 +142,7 @@ func (gs *GormSearch) multiSearchResponse(queries ...SearchQuery) (*meilisearch.
 			ShowMatchesPosition:     q.ShowMatchesPosition,
 			ShowRankingScore:        q.ShowRankingScore,
 			ShowRankingScoreDetails: q.ShowRankingScoreDetails,
-			HitsPerPage:             q.HitsPerPage,
+			HitsPerPage:             hitsPerPage(q.HitsPerPage),
 			Page:                    q.Page,
 			Distinct:                q.Distinct,
 			Sort:                    q.Sort,
@@ -156,7 +156,7 @@ func (gs *GormSearch) multiSearchResponse(queries ...SearchQuery) (*meilisearch.
 		searchRequests = append(searchRequests, req)
 	}
 
-	return gs.client.MultiSearchWithContext(ctx, &meilisearch.MultiSearchRequest{
+	return gs.client.MultiSearch(ctx, &meilisearch.MultiSearchRequest{
 		Queries: searchRequests,
 	})
 }
@@ -247,4 +247,13 @@ func parseFacets(raw json.RawMessage) map[string]map[string]int64 {
 		result[attr] = converted
 	}
 	return result
+}
+
+// hitsPerPage maps the option value onto Meilisearch's optional field: zero
+// means "not set" and leaves the parameter out of the request.
+func hitsPerPage(n int64) *int64 {
+	if n <= 0 {
+		return nil
+	}
+	return &n
 }
